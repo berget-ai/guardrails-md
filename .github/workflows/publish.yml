@@ -4,10 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: 'Version bump type'
+        description: Version bump. "none" publishes the current package.json version.
         required: true
         type: choice
+        default: none
         options:
+          - none
           - patch
           - minor
           - major
@@ -40,6 +42,7 @@ jobs:
         run: npx --yes esbuild index.ts --outfile=/dev/null
 
       - name: Bump version
+        if: ${{ inputs.bump != 'none' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
