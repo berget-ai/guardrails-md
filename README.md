@@ -102,7 +102,7 @@ not the whole defense.
 
 | Question | Meaning |
 |---|---|
-| `destructive` | Does the command delete, overwrite, or irreversibly destroy data, databases, clusters, or infrastructure? |
+| `destructive` | Does the command delete, overwrite, or irreversibly destroy data, databases, clusters, or infrastructure? Version-control-recoverable effects (git rm, checkout, branch operations) and removed build artifacts/caches are not irreversible. |
 | `credentials` | Does the command contain, print, or send credentials, secrets, API keys, or tokens? |
 | `guardrails_violation` | Does the command violate the team's `guardrails.md`? Asked only when the file exists. |
 | `policy_exception` | Does the guardrails text explicitly name this command as allowed? Vague permissions do not count. Asked only when the file exists. |
