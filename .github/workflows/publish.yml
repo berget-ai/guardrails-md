@@ -18,8 +18,9 @@ jobs:
     permissions:
       contents: write
       # OIDC trusted publishing (npmjs.com → @bergetai → Trusted Publisher:
-      # berget-ai/systemone / publish.yml). No NPM_TOKEN needed — the classic
-      # token route expired (misleading 404/401 on publish).
+      # berget-ai/opencode-systemone-gate / publish.yml). No NPM_TOKEN
+      # needed — the classic token route expired (misleading 404/401 on
+      # publish).
       id-token: write
     steps:
       - name: Checkout code
@@ -36,18 +37,16 @@ jobs:
       # The plugin ships as raw TypeScript (opencode transpiles it on load);
       # a parse check is the whole "build".
       - name: Parse check
-        run: npx --yes esbuild opencode-gate/index.ts --outfile=/dev/null
+        run: npx --yes esbuild index.ts --outfile=/dev/null
 
       - name: Bump version
-        working-directory: opencode-gate
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version ${{ inputs.bump }} -m "release(opencode-gate): %s"
+          npm version ${{ inputs.bump }} -m "release: %s"
           git push --follow-tags
 
       - name: Publish to NPM (OIDC trusted publishing)
-        working-directory: opencode-gate
         run: |
           npm install -g npm@latest   # OIDC trusted publishing needs npm >= 11.5.1
           npm publish
