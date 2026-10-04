@@ -1,7 +1,7 @@
 {
   "name": "@bergetai/opencode-systemone-gate",
-  "version": "0.3.0",
-  "description": "opencode plugin: a System One decision model (TypeSafe Jev) judges every bash command before it runs — destructive / credentials / guardrails.md policy",
+  "version": "0.4.0",
+  "description": "opencode plugin: a System One decision model (TypeSafe Jev) judges every bash command before it runs \u2014 destructive / credentials / guardrails.md policy",
   "type": "module",
   "exports": {
     ".": "./index.ts"
