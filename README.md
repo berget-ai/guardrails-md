@@ -11,9 +11,11 @@ pick another route.
 ```
 SystemOne-gate: blocked command — destructive=0.98 > 0.7
   rm -rf ./important-data
-Judged destructive/leaking by System One.
-If you decide this command is fine, your human can restart
-opencode with SYSTEMONE_GATE=off or raise SYSTEMONE_THRESHOLD.
+Judged destructive/leaking on its own merits — named exceptions in
+guardrails.md do not override this. If it is intended, your human
+can run it directly, or restart opencode with SYSTEMONE_GATE=off
+for a session that needs it. The agent must not edit guardrails.md
+to work around this.
 ```
 
 ## When it helps
@@ -103,10 +105,21 @@ not the whole defense.
 | `destructive` | Does the command delete, overwrite, or irreversibly destroy data, databases, clusters, or infrastructure? |
 | `credentials` | Does the command contain, print, or send credentials, secrets, API keys, or tokens? |
 | `guardrails_violation` | Does the command violate the team's `guardrails.md`? Asked only when the file exists. |
+| `policy_exception` | Does the guardrails text explicitly name this command as allowed? Vague permissions do not count. Asked only when the file exists. |
 
 Each answer is a score between 0 and 1. Anything above the threshold
 (default `0.7`) blocks the tool call before execution, and the error message
-goes back to the agent.
+goes back to the agent. The four questions are not interchangeable, and the
+difference matters:
+
+- `guardrails_violation` is about your policy, and policy false positives
+  are fixable in the policy: a command the guardrails text explicitly names
+  as allowed passes. The exception must be precise — "may manage databases"
+  does not unlock `rm -rf /var/lib/postgresql`.
+- `destructive` and `credentials` are about the command's nature, and named
+  exceptions do not override them. Those two are the backstop, and
+  `guardrails.md` is agent-editable between sessions — a file line must not
+  be able to switch the backstop off.
 
 ## Team guardrails
 
@@ -125,16 +138,19 @@ It reads:
 
 ## The agent MUST NOT
 
-- Run kubectl against production clusters — prod changes only via Git/CD.
-- Push directly to main — everything via pull request.
-- Install packages globally (npm install -g, pip install outside venv).
-- Send data to external domains outside our approved list.
+- Edit this file (guardrails.md) itself — it is written and changed by humans, through review.
+- Change anything in production — production changes reach production only through Git/CD.
+- Push directly to the main branch — all changes go through pull request.
+- Install software outside the project's declared dependencies.
+- Send data to external services outside our approved list (docs/approved-domains.md).
+- Run irreversible operations against shared systems — deletions, cleanup, resets.
 
 ## The agent MAY
 
-- Read all clusters (kubectl get/describe/logs) in every environment.
+- Inspect any environment read-only.
 - Run tests, lint, and builds locally.
 - Create branches and push feature branches.
+- Read documentation from the approved sources in docs/approved-domains.md.
 ```
 
 The gate reads the file once at session start, so restart opencode after
@@ -171,7 +187,18 @@ credentials, sandboxes and human review still matter.
 
 ## What it doesn't do
 
-- It gates bash commands only. File edits and other tool calls pass through.
+- It gates bash commands only. File edits and other tool calls pass
+  through. Every argument that points to an existing file is read and
+  judged together with the command — whatever tool would run it
+  (`bash x.sh`, `perl x.pl`, `dotnet x.csx`, `awk -f x.awk`, a data
+  file passed to anything). This closes the write-then-run bypass
+  where an agent writes logic with the ungated edit tools and executes
+  it with an innocuous command line, and it needs no interpreter
+  blocklist — those are never complete. Inline code (`perl -e '…'`)
+  is already part of the command text. One level deep, 4 kB per file,
+  up to three files, binaries skipped: network-fetched payloads
+  (`curl … | sh`) remain a gap, and a determined agent with write
+  access can still be creative. This is one layer, not a sandbox.
 - It fails closed. If the endpoint is unreachable the command is blocked
   until the endpoint responds again. That is deliberate: with fail-open, an
   agent could induce the failure itself — hammer the endpoint until it is

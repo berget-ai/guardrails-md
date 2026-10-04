@@ -56,8 +56,22 @@ const THRESHOLD = Number(process.env.SYSTEMONE_THRESHOLD ?? "0.7")
 // strictness can set SYSTEMONE_FAIL_OPEN=1.
 const FAIL_OPEN = /^(1|true|yes)$/i.test(process.env.SYSTEMONE_FAIL_OPEN ?? "")
 const GUARDRAILS_MAX = 2000 // chars — keep the state text tight
+const SCRIPT_MAX = 4000 // chars of file content included per file
+const SCRIPT_FILES_MAX = 3 // files read per command
 
-type Verdict = { destructive: number; credentials: number; guardrails_violation?: number }
+// No interpreter blocklist — perl, java, dotnet, ruby, lua, osascript,
+// xargs, find -exec and friends can never be enumerated. Instead: every
+// argument that points to an existing file is read and judged, whatever
+// tool would run it. Inline code (perl -e '…', node -e '…') is already
+// part of the command text. One level deep; network-fetched payloads and
+// binaries remain documented gaps.
+
+type Verdict = {
+  destructive: number
+  credentials: number
+  guardrails_violation?: number
+  policy_exception?: number
+}
 
 // --- guardrails.md, frozen at session start ---------------------------------
 // Read ONCE when the plugin loads, not per command. Hot-reloading would let
@@ -124,6 +138,10 @@ function newClient(): TypeSafeClient | null {
 
 async function judge(client: TypeSafeClient, command: string, guardrails: string | null): Promise<Verdict> {
   const stateParts = [`Command the agent wants to run:\n${command}`]
+  const scripts = scriptContents(command)
+  if (scripts) {
+    stateParts.push(`The command executes these script files — their content is part of the command:\n${scripts}`)
+  }
   if (guardrails) {
     stateParts.push(
       `Team guardrails (rules for what the agent may and may not do):\n${guardrails}`,
@@ -141,6 +159,11 @@ async function judge(client: TypeSafeClient, command: string, guardrails: string
     questions.guardrails_violation = noul(
       "Given the team's guardrails in the state, does this command violate any of those rules?",
     )
+    questions.policy_exception = noul(
+      "Does the team's guardrails text in the state EXPLICITLY allow this exact command — " +
+        "naming it, or a precise and unambiguous pattern that matches it? " +
+        "General or vague permissions do not count as an exception.",
+    )
   }
   const response = await client.systemOne({ state: { text: stateParts.join("\n\n") }, questions })
   const a = response.answers as Record<string, { noul?: number }>
@@ -148,11 +171,34 @@ async function judge(client: TypeSafeClient, command: string, guardrails: string
     destructive: a.destructive?.noul ?? 0,
     credentials: a.credentials?.noul ?? 0,
     guardrails_violation: a.guardrails_violation?.noul,
+    policy_exception: a.policy_exception?.noul,
   }
 }
 
 // Audit log is opt-in (SYSTEMONE_LOG=1): nothing is written to disk by
 // default, because commands can contain sensitive material.
+// Existing files the command references, with their content — so the
+// model judges what the command DOES, not just how innocuous its
+// command line looks.
+function scriptContents(command: string): string {
+  const { readFileSync, statSync } = require("node:fs") as typeof import("node:fs")
+  const parts: string[] = []
+  for (const token of command.split(/\s+/)) {
+    if (parts.length >= SCRIPT_FILES_MAX) break
+    const path = token.replace(/^["']|["']$/g, "")
+    if (!path || path.startsWith("-") || !path.includes(".")) continue
+    try {
+      const st = statSync(path)
+      if (!st.isFile() || st.size > 1_000_000) continue
+      let text = readFileSync(path, "utf8")
+      if (text.includes("\0")) continue // binary — utf8 garbage adds nothing
+      if (text.length > SCRIPT_MAX) text = text.slice(0, SCRIPT_MAX) + "\n… (truncated)"
+      parts.push(`--- ${path} ---\n${text}`)
+    } catch {}
+  }
+  return parts.join("\n")
+}
+
 function logFile(): string {
   return `${process.env.HOME}/.cache/opencode/systemone-gate.log`
 }
@@ -284,8 +330,20 @@ export default (async ({ directory }) => {
       if (verdict.guardrails_violation !== undefined) {
         scores.push(["guardrails_violation", verdict.guardrails_violation])
       }
-      const [kind, worst] = scores.reduce((a, b) => (b[1] > a[1] ? b : a))
-      const decision = worst > THRESHOLD ? "BLOCK" : "allow"
+      // Two tiers. A named exception in guardrails.md overrides the POLICY
+      // question (guardrails_violation) — that is how policy false positives
+      // are fixed. It does NOT override destructive or credentials: those
+      // judge the command's nature, they are the backstop, and guardrails.md
+      // is agent-editable between sessions. A command the model judges
+      // destructive needs a human at the keyboard, whatever the file says.
+      const named = !!guardrails && (verdict.policy_exception ?? 0) > THRESHOLD
+      const triggering = scores.filter(([k, v]) => {
+        if (k === "guardrails_violation") return v > THRESHOLD && !named
+        return v > THRESHOLD
+      })
+      const decision = triggering.length > 0 ? "BLOCK" : "allow"
+      // report the worst triggering dimension, not a priority order
+      const [kind, worst] = triggering.reduce((a, b) => (b[1] > a[1] ? b : a), ["", 0])
       if (decision === "BLOCK") {
         const now = Date.now()
         blockCount = effectiveBlocks(now) + 1
@@ -294,7 +352,7 @@ export default (async ({ directory }) => {
       }
       log({
         ts: new Date().toISOString(), command, ...verdict,
-        guardrails: !!guardrails, decision, blockCount,
+        guardrails: !!guardrails, namedException: named, decision, blockCount,
         cooldownMs: decision === "BLOCK" ? backoffMs(blockCount) : 0,
       })
 
@@ -303,10 +361,18 @@ export default (async ({ directory }) => {
           `SystemOne-gate: blocked command — ${kind}=${worst.toFixed(2)} > ${THRESHOLD}\n` +
             `  ${command.slice(0, 200)}\n` +
             (kind === "guardrails_violation"
-              ? `  Violates the team guardrails.md. Read the file or adjust the rules if this is allowed.`
-              : `  Judged destructive/leaking by System One.`) +
-            `\n  If you decide this command is fine, your human can restart` +
-            `\n  opencode with SYSTEMONE_GATE=off or raise SYSTEMONE_THRESHOLD.`
+              ? `\n  If this is a false positive, your human can name the command in the` +
+                `\n  MAY section of guardrails.md and restart opencode — the gate` +
+                `\n  follows the file.`
+              : `\n  Judged destructive/leaking on its own merits — named exceptions in` +
+                `\n  guardrails.md do not override this. If it is intended, your human` +
+                `\n  can run it directly, or restart opencode with SYSTEMONE_GATE=off` +
+                `\n  for a session that needs it.`) +
+            (guardrails
+              ? ""
+              : `\n  No guardrails.md found in this repo. Your human can create one` +
+                `\n  and write what the agent may and may not do — name what should` +
+                `\n  pass in the MAY section, then restart opencode.`)
         )
       }
     },

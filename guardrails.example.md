@@ -2,15 +2,16 @@
 
 ## The agent MUST NOT
 
-- Run `kubectl` against production clusters (any namespace) — prod changes only via Git/CD.
-- Run `git push` directly to `main` — all changes via pull request.
-- Install packages globally (`npm install -g`, `pip install` outside a venv).
-- Send data to external domains outside the approved list in `docs/approved-domains.md`.
-- Run `docker system prune`, `kubectl delete namespace`, or other irreversible cleanup.
+- Edit this file (guardrails.md) itself — it is written and changed by humans, through review.
+- Change anything in production — production changes reach production only through Git/CD.
+- Push directly to the main branch — all changes go through pull request.
+- Install software outside the project's declared dependencies.
+- Send data to external services outside our approved list (docs/approved-domains.md).
+- Run irreversible operations against shared systems — deletions, cleanup, resets.
 
 ## The agent MAY
 
-- Read all clusters (`kubectl get/describe/logs`) in every environment.
+- Inspect any environment read-only.
 - Run tests, lint, and builds locally.
 - Create branches and push feature branches.
-- Fetch documentation from the approved docs sites listed in `docs/approved-domains.md`.
+- Read documentation from the approved sources in docs/approved-domains.md.
