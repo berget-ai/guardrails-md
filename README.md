@@ -63,7 +63,7 @@ forbids pushing to `main` but allows feature branches, or that `kubectl get`
 is fine in prod while `kubectl apply` is not. Asking a second LLM to review
 each command does know that, at the price of a full generation per command.
 
-[System One](https://jev.dev) is a decision model: it reads the command plus
+[System One](https://docs.typesafe.ai) is a decision model: it reads the command plus
 your written rules and returns scores for a fixed set of questions in a
 single forward pass. That makes two things possible.
 
