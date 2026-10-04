@@ -26,13 +26,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/berget-ai/systemone.git",
-    "directory": "opencode-gate"
+    "url": "git+https://github.com/berget-ai/opencode-systemone-gate.git"
   },
   "bugs": {
-    "url": "https://github.com/berget-ai/systemone/issues"
+    "url": "https://github.com/berget-ai/opencode-systemone-gate/issues"
   },
-  "homepage": "https://github.com/berget-ai/systemone/tree/main/opencode-gate#readme",
+  "homepage": "https://github.com/berget-ai/opencode-systemone-gate#readme",
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0"
   },
