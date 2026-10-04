@@ -1,0 +1,41 @@
+{
+  "name": "@bergetai/opencode-systemone-gate",
+  "version": "0.3.0",
+  "description": "opencode plugin: a System One decision model (TypeSafe Jev) judges every bash command before it runs \u2014 destructive / credentials / guardrails.md policy",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    "guardrails.example.md"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "systemone",
+    "safety",
+    "guardrails",
+    "bash",
+    "security"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/berget-ai/opencode-systemone-gate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/berget-ai/opencode-systemone-gate/issues"
+  },
+  "homepage": "https://github.com/berget-ai/opencode-systemone-gate#readme",
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3"
+  }
+}
