@@ -123,15 +123,10 @@ difference matters:
 
 ## Team guardrails
 
-Drop a `guardrails.md` in the repo root (or `.opencode/guardrails.md`).
-The quickest start is the shipped default — sensible for most teams,
-yours to tune:
-
-```sh
-curl -o guardrails.md https://raw.githubusercontent.com/berget-ai/systemone/main/opencode-gate/guardrails.example.md
-```
-
-It reads:
+Write a `guardrails.md` in the repo root (or `.opencode/guardrails.md`).
+Write it yourself — the value is in deciding what your team actually
+allows, not in shipping a generic file. The example below is a starting
+point for the shape:
 
 ```markdown
 # Guardrails for agents in this repo
