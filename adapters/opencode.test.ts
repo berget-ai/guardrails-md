@@ -3,19 +3,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const state = vi.hoisted(() => ({ configs: [] as Record<string, unknown>[] }))
-const systemOne = vi.fn()
-vi.mock("@typesafe-ai/sdk", () => ({
-  noul: (instructions: string) => ({ type: "noul", instructions }),
-  TypeSafeClient: class {
-    constructor(public cfg: Record<string, unknown>) {
-      state.configs.push(cfg)
-    }
-    systemOne(req: unknown) {
-      return systemOne(req)
-    }
-  },
-}))
+const sdk = await vi.hoisted(async () => (await import("../test/sdk-mock.ts")).createSdkMock())
+vi.mock("@typesafe-ai/sdk", () => sdk.module)
+const { systemOne } = sdk
 
 type Hook = (input: { tool: string }, output: { args: { command?: string } }) => Promise<void>
 
@@ -41,7 +31,7 @@ beforeEach(() => {
   vi.stubEnv("XDG_DATA_HOME", undefined)
   vi.stubEnv("SYSTEMONE_GATE", undefined)
   systemOne.mockResolvedValue(structuredClone(allow))
-  state.configs.length = 0
+  sdk.configs.length = 0
 })
 
 afterEach(() => {
@@ -78,7 +68,7 @@ describe("opencode adapter", () => {
     vi.stubEnv("BERGET_API_KEY", undefined)
     const hook = await loadHook()
     await hook({ tool: "bash" }, { args: { command: "ls" } })
-    expect(state.configs[0]?.apiKey).toBe("xdg-tok")
+    expect(sdk.configs[0]?.apiKey).toBe("xdg-tok")
   })
 
   it("Given .opencode/guardrails.md, When bash runs, Then the policy is judged", async () => {

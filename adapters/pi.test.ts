@@ -3,19 +3,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const state = vi.hoisted(() => ({ configs: [] as Record<string, unknown>[] }))
-const systemOne = vi.fn()
-vi.mock("@typesafe-ai/sdk", () => ({
-  noul: (instructions: string) => ({ type: "noul", instructions }),
-  TypeSafeClient: class {
-    constructor(public cfg: Record<string, unknown>) {
-      state.configs.push(cfg)
-    }
-    systemOne(req: unknown) {
-      return systemOne(req)
-    }
-  },
-}))
+const sdk = await vi.hoisted(async () => (await import("../test/sdk-mock.ts")).createSdkMock())
+vi.mock("@typesafe-ai/sdk", () => sdk.module)
+const { systemOne } = sdk
 
 type ToolCall = { type: "tool_call"; toolCallId: string; toolName: string; input: Record<string, unknown>; parentToolCallId?: string }
 type Handler = (event: ToolCall, ctx: unknown) => Promise<{ block: boolean; reason: string } | undefined>
@@ -51,7 +41,7 @@ beforeEach(() => {
   vi.stubEnv("SYSTEMONE_GATE", undefined)
   vi.spyOn(process, "cwd").mockReturnValue(dir)
   systemOne.mockResolvedValue(structuredClone(allow))
-  state.configs.length = 0
+  sdk.configs.length = 0
 })
 
 afterEach(() => {
@@ -113,7 +103,7 @@ describe("pi adapter", () => {
     vi.stubEnv("BERGET_API_KEY", undefined)
     const handler = await loadHandler()
     await handler(bash("ls"), ctx)
-    expect(state.configs[0]?.apiKey).toBe("pi-seat")
+    expect(sdk.configs[0]?.apiKey).toBe("pi-seat")
   })
 
   it("Given no credential, When bash is called twice, Then the human is warned once that the gate is inactive", async () => {
@@ -154,6 +144,6 @@ describe("pi adapter", () => {
     vi.stubEnv("BERGET_API_KEY", undefined)
     const handler = await loadHandler()
     await handler(bash("ls"), ctx)
-    expect(state.configs[0]?.apiKey).toBe("custom-seat")
+    expect(sdk.configs[0]?.apiKey).toBe("custom-seat")
   })
 })

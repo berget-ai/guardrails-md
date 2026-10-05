@@ -4,19 +4,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Harness } from "./core.ts"
 
-const state = vi.hoisted(() => ({ configs: [] as Record<string, unknown>[] }))
-const systemOne = vi.fn()
-vi.mock("@typesafe-ai/sdk", () => ({
-  noul: (instructions: string) => ({ type: "noul", instructions }),
-  TypeSafeClient: class {
-    constructor(public cfg: Record<string, unknown>) {
-      state.configs.push(cfg)
-    }
-    systemOne(req: unknown) {
-      return systemOne(req)
-    }
-  },
-}))
+const sdk = await vi.hoisted(async () => (await import("./test/sdk-mock.ts")).createSdkMock())
+vi.mock("@typesafe-ai/sdk", () => sdk.module)
+const { systemOne } = sdk
 
 async function loadCore() {
   return import("./core.ts")
@@ -68,7 +58,7 @@ beforeEach(() => {
   delete process.env.SYSTEMONE_LOG
   delete process.env.SYSTEMONE_THRESHOLD
   systemOne.mockResolvedValue(structuredClone(allow))
-  state.configs.length = 0
+  sdk.configs.length = 0
 })
 
 afterEach(() => {
@@ -236,13 +226,13 @@ describe("check: happy path", () => {
     delete process.env.BERGET_API_KEY
     const gate = await makeGate()
     await gate.check("ls")
-    expect(state.configs[0]?.apiKey).toBe("seat-tok")
+    expect(sdk.configs[0]?.apiKey).toBe("seat-tok")
   })
   it("falls back to BERGET_API_KEY when the seat token is expired", async () => {
     seedAuth({ berget: { type: "oauth", access: "old", expires: Date.now() - 1000 } })
     const gate = await makeGate()
     await gate.check("ls")
-    expect(state.configs[0]?.apiKey).toBe("test-key")
+    expect(sdk.configs[0]?.apiKey).toBe("test-key")
   })
 })
 

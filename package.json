@@ -1,6 +1,6 @@
 {
   "name": "@bergetai/opencode-guardrails-md",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "guardrails.md gate for opencode and pi: a System One decision model (TypeSafe Jev) judges every bash command before it runs — destructive / credentials / guardrails.md policy",
   "type": "module",
   "exports": {
