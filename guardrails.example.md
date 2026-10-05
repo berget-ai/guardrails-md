@@ -9,6 +9,12 @@
 - Send data to external services outside our approved list (docs/approved-domains.md).
 - Run irreversible operations against shared systems — deletions, cleanup, resets.
 
+## Git commits
+
+- Never commit personal data about people outside the team — customers, users, or other third parties (names combined with identity information, addresses, phone numbers, emails, health data).
+- Never commit credentials, secrets, API keys, or tokens that grant access to a system.
+- The team's own names as attribution in content meant to be published (blog bylines, author fields, copyright headers) are fine.
+
 ## The agent MAY
 
 - Inspect any environment read-only.
