@@ -1,6 +1,6 @@
 {
   "name": "@bergetai/opencode-guardrails-md",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "guardrails.md plugin \u2014 opencode: a System One decision model (TypeSafe Jev) judges every bash command before it runs \u2014 destructive / credentials / guardrails.md policy",
   "type": "module",
   "exports": {
@@ -8,6 +8,7 @@
   },
   "files": [
     "index.ts",
+    "internals.ts",
     "README.md",
     "guardrails.example.md"
   ],

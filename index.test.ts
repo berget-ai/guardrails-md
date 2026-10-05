@@ -24,7 +24,10 @@ type Hooks = {
 
 async function loadPlugin() {
   const mod = await import("./index.js")
-  return mod
+  // Test hooks live in internals.ts — index.ts must export only plugin
+  // functions (opencode's legacy loader throws on non-function exports).
+  const internals = await import("./internals.js")
+  return { ...mod, __internals: internals }
 }
 
 let dir: string
