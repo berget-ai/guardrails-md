@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: Version bump. "none" publishes the current package.json version.
+        description: Version bump. "none" publishes the current package.json version. Bump via a normal PR when releasing.
         required: true
         type: choice
         default: none
@@ -18,7 +18,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       # OIDC trusted publishing (npmjs.com → @bergetai → Trusted Publisher:
       # berget-ai/opencode-systemone-gate / publish.yml). No NPM_TOKEN
       # needed — the classic token route expired (misleading 404/401 on
@@ -41,14 +41,8 @@ jobs:
       - name: Parse check
         run: npx --yes esbuild index.ts --outfile=/dev/null
 
-      - name: Bump version
-        if: ${{ inputs.bump != 'none' }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version ${{ inputs.bump }} -m "release: %s"
-          git push --follow-tags
-
+      # Version bumps happen via a normal PR (main is protected). This
+      # workflow publishes whatever package.json currently says.
       - name: Publish to NPM (OIDC trusted publishing)
         run: |
           npm install -g npm@latest   # OIDC trusted publishing needs npm >= 11.5.1
