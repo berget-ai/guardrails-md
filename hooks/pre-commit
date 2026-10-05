@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""guardrails-md pre-commit — bev judges the staged diff before it enters git.
+
+Blocks commits containing personal data (GDPR) or secrets. Fail-closed by
+default: if the endpoint is unreachable, the commit is blocked (retry, or
+SYSTEMONE_FAIL_OPEN=1 to prefer availability).
+
+Config (env): BERGET_API_KEY, BERGET_BASE_URL (default api.berget.ai),
+BERGET_MODEL (default berget/bev-1), SYSTEMONE_THRESHOLD (default 0.7),
+SYSTEMONE_FAIL_OPEN=1, SYSTEMONE_LOG=1 (JSONL audit at ~/.cache/guardrails-md/pre-commit.log).
+"""
+import json, os, subprocess, sys, urllib.request, urllib.error
+from datetime import datetime, timezone
+
+THRESHOLD = float(os.environ.get("SYSTEMONE_THRESHOLD", "0.7"))
+FAIL_OPEN = os.environ.get("SYSTEMONE_FAIL_OPEN", "") == "1"
+LOGFILE = os.path.join(
+    os.environ.get("HOME", ""), ".cache", "guardrails-md", "pre-commit.log"
+)
+DIFF_CAP = 12000
+
+QUESTIONS = {
+    "personal_data": {
+        "type": "noul",
+                "instructions": (
+            "Does this diff introduce personal data about people outside the "
+            "team — customers, users, or other third parties — into the "
+            "repository: for example a customer's name combined with a "
+            "personal identity number, address, phone number, email, or "
+            "health data? The team's own names used as attribution in content "
+            "meant to be published — for example an author byline on a blog "
+            "post, an author field in a config file, or a copyright header — "
+            "are not a violation. A personal identity number, home address, "
+            "or password is personal data even when it belongs to a team "
+            "member."
+        ),
+    },
+    "secrets": {
+        "type": "noul",
+        "instructions": (
+            "Does this diff contain credentials, secrets, API keys, passwords, "
+            "or tokens that grant access to a system? Example-shaped "
+            "placeholders and test dummies do not count."
+        ),
+    },
+}
+
+
+def log(entry):
+    if os.environ.get("SYSTEMONE_LOG", "") != "1":
+        return
+    try:
+        os.makedirs(os.path.dirname(LOGFILE), exist_ok=True)
+        with open(LOGFILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
+def staged_diff():
+    diff = subprocess.run(
+        ["git", "diff", "--cached", "--unified=0"],
+        capture_output=True, text=True,
+    ).stdout
+    return diff[:DIFF_CAP]
+
+
+def judge(diff):
+    body = json.dumps({
+        "model": os.environ.get("BERGET_MODEL", "berget/bev-1"),
+        "state": {"text": "Staged changes about to be committed to the git repository:\n" + diff},
+        "questions": QUESTIONS,
+    })
+    req = urllib.request.Request(
+        f"{os.environ.get('BERGET_BASE_URL', 'https://api.berget.ai')}/v1/systemone",
+        data=body.encode(),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.environ.get('BERGET_API_KEY', '')}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read())
+
+
+def main():
+    diff = staged_diff()
+    if not diff.strip():
+        sys.exit(0)  # nothing staged
+
+    try:
+        response = judge(diff)
+    except Exception as err:
+        if FAIL_OPEN:
+            log({"ts": now(), "error": str(err), "decision": "fail-open"})
+            sys.exit(0)
+        log({"ts": now(), "error": str(err), "decision": "fail-closed"})
+        print(
+            "guardrails-md: endpoint unreachable — commit blocked "
+            "(SYSTEMONE_FAIL_OPEN). Retry shortly, or set "
+            "SYSTEMONE_FAIL_OPEN=1 to prefer availability.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    answers = response.get("answers", {})
+    scores = {k: answers.get(k, {}).get("noul", 0) for k in QUESTIONS}
+    triggered = {k: v for k, v in scores.items() if v > THRESHOLD}
+
+    log({
+        "ts": now(), "scores": scores,
+        "decision": "BLOCK" if triggered else "allow",
+    })
+
+    if not triggered:
+        sys.exit(0)
+
+    worst = max(triggered, key=triggered.get)
+    reasons = {
+        "personal_data": "personal data (GDPR)",
+        "secrets": "credentials or secrets",
+    }
+    print(
+        f"guardrails-md: commit blocked — {worst}="
+        f"{triggered[worst]:.2f} > {THRESHOLD} ({reasons[worst]}).\n"
+        "  Remove the sensitive content and stage again. If this is a false\n"
+        "  positive, raise SYSTEMONE_THRESHOLD or set SYSTEMONE_FAIL_OPEN=1.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+if __name__ == "__main__":
+    main()
