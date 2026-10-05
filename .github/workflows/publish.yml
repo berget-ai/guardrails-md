@@ -36,10 +36,27 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      # The plugin ships as raw TypeScript (opencode and pi transpile it on load);
-      # a parse check is the whole "build".
-      - name: Parse check
-        run: npx --yes esbuild adapters/opencode.ts adapters/pi.ts --bundle --platform=node --external:@typesafe-ai/sdk --outdir=/tmp/parse-check
+      # The plugin ships as raw TypeScript (opencode and pi transpile it on
+      # load); a parse check is the whole "build". --bundle forces esbuild to
+      # RESOLVE relative imports — a plain parse accepts an adapter even when
+      # ../core.ts is missing from the package, which is exactly the
+      # breakage the files-whitelist below must never ship.
+      - name: Parse + import-resolution check
+        run: npx --yes esbuild --bundle adapters/opencode.ts adapters/pi.ts --outdir=/tmp/parse-check --platform=node --external:@typesafe-ai/sdk --external:@opencode-ai/plugin --external:@earendil-works/pi-coding-agent "--external:node:*"
+
+      # The package ships raw .ts via a files whitelist; forgetting a module
+      # there publishes a plugin that fails to load for every user. Pack,
+      # extract, and bundle from INSIDE the tarball — this enforces
+      # "the published package is self-contained" structurally, for every
+      # current and future runtime module, with no list to maintain.
+      - name: Tarball is self-contained
+        run: |
+          mkdir -p /tmp/pkg && npm pack --pack-destination /tmp/pkg >/dev/null
+          tar -xzf /tmp/pkg/*.tgz -C /tmp/pkg
+          npx --yes esbuild --bundle /tmp/pkg/package/adapters/opencode.ts /tmp/pkg/package/adapters/pi.ts \
+            --outdir=/tmp/pkg/out --platform=node \
+            --external:@typesafe-ai/sdk --external:@opencode-ai/plugin --external:@earendil-works/pi-coding-agent "--external:node:*"
+          echo "tarball OK: every relative import resolves inside the published package"
 
       # Version bumps happen via a normal PR (main is protected). This
       # workflow publishes whatever package.json currently says.

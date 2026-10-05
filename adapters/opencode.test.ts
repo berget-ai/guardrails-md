@@ -45,6 +45,11 @@ afterEach(() => {
 })
 
 describe("opencode adapter", () => {
+  it("Given opencode's loader calls every export, When the module loads, Then every export is a function", async () => {
+    const mod = await import("./opencode.ts")
+    for (const value of Object.values(mod)) expect(value).toBeTypeOf("function")
+  })
+
   it("Given a non-bash tool, When it is called, Then the model is not asked", async () => {
     const hook = await loadHook()
     await hook({ tool: "edit" }, { args: {} })
