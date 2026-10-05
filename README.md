@@ -73,7 +73,7 @@ See [`guardrails.example.md`](guardrails.example.md).
 
 ```json
 {
-  "plugin": ["opencode-guardrails-md"]
+  "plugin": ["@bergetai/opencode-guardrails-md"]
 }
 ```
 
