@@ -109,18 +109,26 @@ function gatewayRoot(url: string | undefined): string | undefined {
 // Berget Code seat token from opencode's auth storage (maintained and
 // refreshed by @bergetai/opencode-auth). Read per request so a mid-session
 // refresh is picked up. Returns null when absent or expired.
-function seatToken(): string | null {
+function readSeatAuth(): { access: string; expires: number } | null {
   try {
     const { readFileSync } = require("node:fs") as typeof import("node:fs")
     const path = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/auth.json`
     const auth = JSON.parse(readFileSync(path, "utf8"))?.berget
     if (auth?.type !== "oauth" || typeof auth.access !== "string" || !auth.access) return null
-    const exp = typeof auth.expires === "number" ? auth.expires : Number(auth.expires)
-    if (Number.isFinite(exp) && exp > 0 && exp < Date.now()) return null // stale
-    return auth.access
+    return { access: auth.access, expires: Number(auth.expires) }
   } catch {
     return null
   }
+}
+
+function isStale(expires: number): boolean {
+  return Number.isFinite(expires) && expires > 0 && expires < Date.now()
+}
+
+function seatToken(): string | null {
+  const auth = readSeatAuth()
+  if (!auth || isStale(auth.expires)) return null // stale: let the API key take over
+  return auth.access
 }
 
 function newClient(): TypeSafeClient | null {
@@ -136,7 +144,13 @@ function newClient(): TypeSafeClient | null {
   })
 }
 
-async function judge(client: TypeSafeClient, command: string, guardrails: string | null): Promise<Verdict> {
+interface JudgeContext {
+  client: TypeSafeClient
+  command: string
+  guardrails: string | null
+}
+
+async function judge({ client, command, guardrails }: JudgeContext): Promise<Verdict> {
   const stateParts = [`Command the agent wants to run:\n${command}`]
   const scripts = scriptContents(command)
   if (scripts) {
@@ -180,21 +194,28 @@ async function judge(client: TypeSafeClient, command: string, guardrails: string
 // Existing files the command references, with their content — so the
 // model judges what the command DOES, not just how innocuous its
 // command line looks.
-function scriptContents(command: string): string {
+function readableFile(token: string): string | null {
   const { readFileSync, statSync } = require("node:fs") as typeof import("node:fs")
+  const path = token.replace(/^["']|["']$/g, "")
+  if (!path || path.startsWith("-") || !path.includes(".")) return null
+  try {
+    const st = statSync(path)
+    if (!st.isFile() || st.size > 1_000_000) return null
+    let text = readFileSync(path, "utf8")
+    if (text.includes("\0")) return null // binary — utf8 garbage adds nothing
+    if (text.length > SCRIPT_MAX) text = text.slice(0, SCRIPT_MAX) + "\n… (truncated)"
+    return `--- ${path} ---\n${text}`
+  } catch {
+    return null
+  }
+}
+
+function scriptContents(command: string): string {
   const parts: string[] = []
   for (const token of command.split(/\s+/)) {
     if (parts.length >= SCRIPT_FILES_MAX) break
-    const path = token.replace(/^["']|["']$/g, "")
-    if (!path || path.startsWith("-") || !path.includes(".")) continue
-    try {
-      const st = statSync(path)
-      if (!st.isFile() || st.size > 1_000_000) continue
-      let text = readFileSync(path, "utf8")
-      if (text.includes("\0")) continue // binary — utf8 garbage adds nothing
-      if (text.length > SCRIPT_MAX) text = text.slice(0, SCRIPT_MAX) + "\n… (truncated)"
-      parts.push(`--- ${path} ---\n${text}`)
-    } catch {}
+    const content = readableFile(token)
+    if (content) parts.push(content)
   }
   return parts.join("\n")
 }
@@ -236,6 +257,7 @@ const DECAY_MS = 30 * 60_000
 let blockCount = 0
 let lastBlockAt = 0
 let cooldownUntil = 0
+let loggedInactive = false
 
 function effectiveBlocks(now: number): number {
   if (blockCount === 0 || lastBlockAt === 0) return 0
@@ -250,44 +272,176 @@ function backoffMs(blocks: number): number {
   return BACKOFF_BASE_MS * 2 ** Math.min(blocks - 1, 40)
 }
 
+// --- extracted hook steps (each small, each testable) -----------------------
+
+function enforceCooldown(): void {
+  const remainingMs = cooldownUntil - Date.now()
+  if (remainingMs <= 0) return
+  const wait =
+    remainingMs >= 90_000
+      ? `${Math.round(remainingMs / 60_000)} min`
+      : remainingMs >= 1000
+        ? `${Math.ceil(remainingMs / 1000)} s`
+        : `${remainingMs} ms`
+  throw new Error(
+    `SystemOne-gate: cooling down after ${blockCount} blocked command${blockCount === 1 ? "" : "s"} — ` +
+      `next attempt in ~${wait}. The wait doubles with every block; ` +
+      `restarting opencode resets it.`,
+  )
+}
+
+function endpointReason(status: number | undefined): string {
+  if (status === 402) return "Berget account out of credit — top up at berget.ai"
+  if (status === 401)
+    return "authentication failed — re-login via @bergetai/opencode-auth or check BERGET_API_KEY"
+  if (status === 429) return "rate limited — wait a moment and retry"
+  return "endpoint unreachable"
+}
+
+async function judgeOrThrow(ctx: JudgeContext): Promise<Verdict> {
+  try {
+    return await judge(ctx)
+  } catch (err) {
+    const reason = endpointReason((err as { status?: number }).status)
+    const decision = FAIL_OPEN ? "fail-open" : "fail-closed"
+    log({ ts: new Date().toISOString(), command: ctx.command, error: String(err), decision })
+    if (FAIL_OPEN) return { destructive: 0, credentials: 0 } // availability over strictness
+    throw new Error(
+      `SystemOne-gate: ${reason} — command blocked.\n` +
+        `  ${ctx.command.slice(0, 200)}\n` +
+        `  ${String(err).slice(0, 160)}\n` +
+        `  Retry shortly, or set SYSTEMONE_FAIL_OPEN=1 to prefer availability.`,
+    )
+  }
+}
+
+// Two tiers. A named exception in guardrails.md overrides the POLICY
+// question (guardrails_violation) — that is how policy false positives are
+// fixed. It does NOT override destructive or credentials: those judge the
+// command's nature, they are the backstop, and guardrails.md is
+// agent-editable between sessions. A command the model judges destructive
+// needs a human at the keyboard, whatever the file says.
+type Dimension = "destructive" | "credentials" | "guardrails_violation"
+
+interface Outcome {
+  decision: "BLOCK" | "allow"
+  kind: Dimension
+  worst: number
+  named: boolean
+}
+
+function decide(verdict: Verdict, hasGuardrails: boolean): Outcome {
+  const named = hasGuardrails && (verdict.policy_exception ?? 0) > THRESHOLD
+  const dimensions: [Dimension, number][] = [
+    ["destructive", verdict.destructive],
+    ["credentials", verdict.credentials],
+  ]
+  if (verdict.guardrails_violation !== undefined) {
+    dimensions.push(["guardrails_violation", verdict.guardrails_violation])
+  }
+  const triggering = dimensions.filter(([dimension, score]) => {
+    if (dimension === "guardrails_violation") return score > THRESHOLD && !named
+    return score > THRESHOLD
+  })
+  const decision = triggering.length > 0 ? "BLOCK" : "allow"
+  // report the worst triggering dimension, not a priority order
+  const [kind, worst] = triggering.reduce(
+    (a, b) => (b[1] > a[1] ? b : a),
+    ["destructive", 0] as [Dimension, number],
+  )
+  return { decision, kind, worst, named }
+}
+
+function logVerdict(entry: {
+  command: string
+  verdict: Verdict
+  hasGuardrails: boolean
+  outcome: Outcome
+}): void {
+  log({
+    ts: new Date().toISOString(),
+    command: entry.command,
+    ...entry.verdict,
+    guardrails: entry.hasGuardrails,
+    namedException: entry.outcome.named,
+    decision: entry.outcome.decision,
+    blockCount,
+    cooldownMs: entry.outcome.decision === "BLOCK" ? backoffMs(blockCount) : 0,
+  })
+}
+
+function throwBlock(entry: { command: string; outcome: Outcome; hasGuardrails: boolean }): void {
+  throw new Error(
+    blockMessage(entry.outcome, entry.hasGuardrails) +
+      `\n  ${entry.command.slice(0, 200)}`,
+  )
+}
+
+function registerBlock(): void {
+  const now = Date.now()
+  blockCount = effectiveBlocks(now) + 1
+  lastBlockAt = now
+  cooldownUntil = now + backoffMs(blockCount)
+}
+
+// Credentials resolve lazily: the seat token can appear or be refreshed
+// mid-session by @bergetai/opencode-auth.
+function resolveClient(): TypeSafeClient | null {
+  const client = newClient()
+  if (client) return client
+  if (!loggedInactive) {
+    log({
+      ts: new Date().toISOString(),
+      note: "gate inactive: no seat token, BERGET_API_KEY or TYPESAFE_API_KEY",
+    })
+    loggedInactive = true
+  }
+  return null
+}
+
+function readCommand(output: { args?: { command?: string } }): string {
+  return String(output.args?.command ?? "").trim()
+}
+
+function blockMessage(outcome: Outcome, hasGuardrails: boolean): string {
+  const perKind =
+    outcome.kind === "guardrails_violation"
+      ? `\n  If this is a false positive, your human can name the command in the` +
+        `\n  MAY section of guardrails.md and restart opencode — the gate` +
+        `\n  follows the file.`
+      : `\n  Judged destructive/leaking on its own merits — named exceptions in` +
+        `\n  guardrails.md do not override this. If it is intended, your human` +
+        `\n  can run it directly, or restart opencode with SYSTEMONE_GATE=off` +
+        `\n  for a session that needs it.`
+  const bootstrap = hasGuardrails
+    ? ""
+    : `\n  No guardrails.md found in this repo. Your human can create one` +
+      `\n  and write what the agent may and may not do — name what should` +
+      `\n  pass in the MAY section, then restart opencode.`
+  return (
+    `SystemOne-gate: blocked command — ${outcome.kind}=${outcome.worst.toFixed(2)} > ${THRESHOLD}\n` +
+    `  ${""}` +
+    perKind +
+    bootstrap
+  )
+}
+
 export default (async ({ directory }) => {
   // Freeze guardrails NOW, at plugin load — before any command is judged.
   // A lazy first-read would let an agent weaken guardrails.md via the
   // ungated edit tools before issuing its first bash command and rule the
   // whole session under its own rules.
   readGuardrails(directory)
-  let loggedInactive = false
 
   return {
     "tool.execute.before": async (input, output) => {
       if (input.tool !== "bash") return
       if (process.env.SYSTEMONE_GATE === "off") return
-      // Resolve credentials lazily: the seat token can appear or be
-      // refreshed mid-session by @bergetai/opencode-auth.
-      const client = newClient()
-      if (!client) {
-        if (!loggedInactive) {
-          log({ ts: new Date().toISOString(), note: "gate inactive: no seat token, BERGET_API_KEY or TYPESAFE_API_KEY" })
-          loggedInactive = true
-        }
-        return
-      }
-      const command = String((output.args as { command?: string })?.command ?? "").trim()
+      const client = resolveClient()
+      if (!client) return
+      const command = readCommand(output)
       if (!command) return
-      const remainingMs = cooldownUntil - Date.now()
-      if (remainingMs > 0) {
-        const wait =
-          remainingMs >= 90_000
-            ? `${Math.round(remainingMs / 60_000)} min`
-            : remainingMs >= 1000
-              ? `${Math.ceil(remainingMs / 1000)} s`
-              : `${remainingMs} ms`
-        throw new Error(
-          `SystemOne-gate: cooling down after ${blockCount} blocked command${blockCount === 1 ? "" : "s"} — ` +
-            `next attempt in ~${wait}. The wait doubles with every block; ` +
-            `restarting opencode resets it.`,
-        )
-      }
+      enforceCooldown()
 
       // Every command is judged — no fast path of any kind. Prefix
       // allowlists ("it starts with ls, let it through") are exactly the
@@ -297,84 +451,13 @@ export default (async ({ directory }) => {
       // guardrails.md, all set before or around the session.
 
       const guardrails = readGuardrails(directory)
-      let verdict: Verdict
-      try {
-        verdict = await judge(client, command, guardrails)
-      } catch (err) {
-        const status = (err as { status?: number }).status
-        const reason =
-          status === 402
-            ? "Berget account out of credit — top up at berget.ai"
-            : status === 401
-              ? "authentication failed — re-login via @bergetai/opencode-auth or check BERGET_API_KEY"
-              : status === 429
-                ? "rate limited — wait a moment and retry"
-                : "endpoint unreachable"
-        if (FAIL_OPEN) {
-          log({ ts: new Date().toISOString(), command, error: String(err), decision: "fail-open" })
-          return // explicit opt-out: availability over strictness
-        }
-        log({ ts: new Date().toISOString(), command, error: String(err), decision: "fail-closed" })
-        throw new Error(
-          `SystemOne-gate: ${reason} — command blocked.\n` +
-            `  ${command.slice(0, 200)}\n` +
-            `  ${String(err).slice(0, 160)}\n` +
-            `  Retry shortly, or set SYSTEMONE_FAIL_OPEN=1 to prefer availability.`,
-        )
-      }
+      const verdict = await judgeOrThrow({ client, command, guardrails })
 
-      const scores: [string, number][] = [
-        ["destructive", verdict.destructive],
-        ["credentials", verdict.credentials],
-      ]
-      if (verdict.guardrails_violation !== undefined) {
-        scores.push(["guardrails_violation", verdict.guardrails_violation])
-      }
-      // Two tiers. A named exception in guardrails.md overrides the POLICY
-      // question (guardrails_violation) — that is how policy false positives
-      // are fixed. It does NOT override destructive or credentials: those
-      // judge the command's nature, they are the backstop, and guardrails.md
-      // is agent-editable between sessions. A command the model judges
-      // destructive needs a human at the keyboard, whatever the file says.
-      const named = !!guardrails && (verdict.policy_exception ?? 0) > THRESHOLD
-      const triggering = scores.filter(([k, v]) => {
-        if (k === "guardrails_violation") return v > THRESHOLD && !named
-        return v > THRESHOLD
-      })
-      const decision = triggering.length > 0 ? "BLOCK" : "allow"
-      // report the worst triggering dimension, not a priority order
-      const [kind, worst] = triggering.reduce((a, b) => (b[1] > a[1] ? b : a), ["", 0])
-      if (decision === "BLOCK") {
-        const now = Date.now()
-        blockCount = effectiveBlocks(now) + 1
-        lastBlockAt = now
-        cooldownUntil = now + backoffMs(blockCount)
-      }
-      log({
-        ts: new Date().toISOString(), command, ...verdict,
-        guardrails: !!guardrails, namedException: named, decision, blockCount,
-        cooldownMs: decision === "BLOCK" ? backoffMs(blockCount) : 0,
-      })
+      const outcome = decide(verdict, !!guardrails)
+      if (outcome.decision === "BLOCK") registerBlock()
+      logVerdict({ command, verdict, hasGuardrails: !!guardrails, outcome })
 
-      if (decision === "BLOCK") {
-        throw new Error(
-          `SystemOne-gate: blocked command — ${kind}=${worst.toFixed(2)} > ${THRESHOLD}\n` +
-            `  ${command.slice(0, 200)}\n` +
-            (kind === "guardrails_violation"
-              ? `\n  If this is a false positive, your human can name the command in the` +
-                `\n  MAY section of guardrails.md and restart opencode — the gate` +
-                `\n  follows the file.`
-              : `\n  Judged destructive/leaking on its own merits — named exceptions in` +
-                `\n  guardrails.md do not override this. If it is intended, your human` +
-                `\n  can run it directly, or restart opencode with SYSTEMONE_GATE=off` +
-                `\n  for a session that needs it.`) +
-            (guardrails
-              ? ""
-              : `\n  No guardrails.md found in this repo. Your human can create one` +
-                `\n  and write what the agent may and may not do — name what should` +
-                `\n  pass in the MAY section, then restart opencode.`)
-        )
-      }
+      if (outcome.decision === "BLOCK") throwBlock({ command, outcome, hasGuardrails: !!guardrails })
     },
   }
 }) satisfies Plugin
