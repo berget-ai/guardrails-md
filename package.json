@@ -1,13 +1,14 @@
 {
   "name": "@bergetai/opencode-guardrails-md",
   "version": "0.5.1",
-  "description": "guardrails.md plugin — opencode: a System One decision model (TypeSafe Jev) judges every bash command before it runs — destructive / credentials / guardrails.md policy",
+  "description": "guardrails.md plugin \u2014 opencode: a System One decision model (TypeSafe Jev) judges every bash command before it runs \u2014 destructive / credentials / guardrails.md policy",
   "type": "module",
   "exports": {
     ".": "./index.ts"
   },
   "files": [
     "index.ts",
+    "internals.ts",
     "README.md",
     "guardrails.example.md"
   ],
