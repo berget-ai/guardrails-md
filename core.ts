@@ -14,7 +14,7 @@
  *   guardrails_violation — violates the team's guardrails.md? (if present)
  *
  * Credentials, in order: the harness's Berget seat token, then
- * BERGET_API_KEY, then the SDK's TYPESAFE_API_KEY. Endpoints: defaults to
+ * BERGET_API_KEY. Endpoints: defaults to
  * Berget's hosted System One API (api.berget.ai, model berget/bev). Any
  * other System One-compatible gateway works via BERGET_BASE_URL/BERGET_MODEL.
  *
@@ -22,8 +22,8 @@
  * blocks commands (fail-open would be an agent-reachable kill switch —
  * it can induce the failure). SYSTEMONE_FAIL_OPEN=1 opts out.
  *
- * Config: BERGET_API_KEY, BERGET_BASE_URL, BERGET_MODEL (fallback: the SDK's
- * TYPESAFE_* vars), SYSTEMONE_THRESHOLD (0.7), SYSTEMONE_FAIL_OPEN=1,
+ * Config: BERGET_API_KEY, BERGET_BASE_URL, BERGET_MODEL, SYSTEMONE_THRESHOLD
+ * (0.7), SYSTEMONE_FAIL_OPEN=1,
  * SYSTEMONE_GATE=off, SYSTEMONE_LOG=1.
  */
 import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
@@ -111,7 +111,7 @@ export function seatToken(authPath: string): string | null {
 }
 
 function apiKey(authPath: string): string | undefined {
-  return seatToken(authPath) ?? process.env.BERGET_API_KEY ?? process.env.TYPESAFE_API_KEY
+  return seatToken(authPath) ?? process.env.BERGET_API_KEY
 }
 
 function newClient(authPath: string): TypeSafeClient | null {
@@ -119,10 +119,8 @@ function newClient(authPath: string): TypeSafeClient | null {
   if (!key) return null
   return new TypeSafeClient({
     apiKey: key,
-    baseURL: gatewayRoot(
-      process.env.BERGET_BASE_URL ?? process.env.TYPESAFE_BASE_URL ?? "https://api.berget.ai",
-    ),
-    defaultModel: process.env.BERGET_MODEL ?? process.env.TYPESAFE_DEFAULT_MODEL ?? "berget/bev",
+    baseURL: gatewayRoot(process.env.BERGET_BASE_URL ?? "https://api.berget.ai"),
+    defaultModel: process.env.BERGET_MODEL ?? "berget/bev",
     timeout: 5000,
   })
 }
@@ -357,7 +355,7 @@ export function createGate(harness: Harness, directory: string) {
     if (!loggedInactive) {
       log(harness.logPath, {
         ts: new Date().toISOString(),
-        note: "gate inactive: no seat token, BERGET_API_KEY or TYPESAFE_API_KEY",
+        note: "gate inactive: no seat token or BERGET_API_KEY",
       })
       loggedInactive = true
     }

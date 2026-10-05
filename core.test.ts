@@ -236,6 +236,25 @@ describe("check: happy path", () => {
   })
 })
 
+describe("check: TypeSafe env vars are not used", () => {
+  it("Given only TYPESAFE_API_KEY, When a command is checked, Then the gate is inactive", async () => {
+    vi.stubEnv("BERGET_API_KEY", undefined)
+    vi.stubEnv("TYPESAFE_API_KEY", "ts-key")
+    const gate = await makeGate()
+    await expect(gate.check("rm -rf /")).resolves.toBeNull()
+    expect(systemOne).not.toHaveBeenCalled()
+    expect(gate.hasCredential()).toBe(false)
+  })
+
+  it("Given TYPESAFE_BASE_URL and TYPESAFE_DEFAULT_MODEL, When a command is checked, Then the Berget defaults are used", async () => {
+    vi.stubEnv("TYPESAFE_BASE_URL", "https://api.typesafe.example")
+    vi.stubEnv("TYPESAFE_DEFAULT_MODEL", "typesafe/jev")
+    const gate = await makeGate()
+    await gate.check("ls")
+    expect(sdk.configs[0]).toMatchObject({ baseURL: "https://api.berget.ai", defaultModel: "berget/bev" })
+  })
+})
+
 describe("check: blocking", () => {
   it("blocks above threshold with kind, scores and human-only override", async () => {
     systemOne.mockResolvedValue(blockDestructive)
