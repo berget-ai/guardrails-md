@@ -429,7 +429,7 @@ function blockMessage(outcome: Outcome, hasGuardrails: boolean): string {
   )
 }
 
-export default (async ({ directory }) => {
+export const SystemOneGate = (async ({ directory }) => {
   // Freeze guardrails NOW, at plugin load — before any command is judged.
   // A lazy first-read would let an agent weaken guardrails.md via the
   // ungated edit tools before issuing its first bash command and rule the
@@ -476,3 +476,5 @@ export const __internals = {
   judge,
   logFile,
 }
+
+export default SystemOneGate
