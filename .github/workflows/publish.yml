@@ -45,15 +45,17 @@ jobs:
         run: npx --yes esbuild --bundle index.ts --outfile=/dev/null --external:@typesafe-ai/sdk --external:@opencode-ai/plugin "--external:node:*"
 
       # The package ships raw .ts via a files whitelist; forgetting a module
-      # there publishes a plugin that fails to load for every user. Assert
-      # the tarball actually contains every runtime module index.ts imports.
-      - name: Tarball contains all runtime modules
+      # there publishes a plugin that fails to load for every user. Pack,
+      # extract, and bundle from INSIDE the tarball — this enforces
+      # "the published package is self-contained" structurally, for every
+      # current and future runtime module, with no list to maintain.
+      - name: Tarball is self-contained
         run: |
-          PACKED=$(npm pack --dry-run --json)
-          for f in index.ts internals.ts; do
-            echo "$PACKED" | grep -q "\"$f\"" || { echo "::error ::$f missing from npm tarball (check package.json files)"; exit 1; }
-          done
-          echo "tarball OK: index.ts + internals.ts present"
+          mkdir -p /tmp/pkg && npm pack --pack-destination /tmp/pkg >/dev/null
+          tar -xzf /tmp/pkg/*.tgz -C /tmp/pkg
+          npx --yes esbuild --bundle /tmp/pkg/package/index.ts --outfile=/dev/null \
+            --external:@typesafe-ai/sdk --external:@opencode-ai/plugin "--external:node:*"
+          echo "tarball OK: every relative import resolves inside the published package"
 
       # Version bumps happen via a normal PR (main is protected). This
       # workflow publishes whatever package.json currently says.
