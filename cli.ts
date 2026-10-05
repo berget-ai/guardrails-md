@@ -5,7 +5,7 @@
  *   npx guardrails-md pre-commit
  *
  * Reads the staged diff and the repo's guardrails.md (the same file the
- * agent gate reads), and asks a decision model two questions before the
+ * agent gate uses), and asks a decision model two questions before the
  * commit is allowed: does the diff introduce personal data in violation of
  * the git-content rules, and does it contain secrets?
  *
@@ -19,9 +19,10 @@
  * Config: BERGET_API_KEY, BERGET_BASE_URL, BERGET_MODEL,
  * SYSTEMONE_THRESHOLD, SYSTEMONE_FAIL_OPEN, SYSTEMONE_LOG.
  */
+import { execSync } from "node:child_process"
 import { createGate } from "./core.ts"
 
-const FAIL_OPEN = process.env.SYSTEMONE_FAIL_OPEN === "1"
+const FAIL_OPEN = /^(1|true|yes)$/i.test(process.env.SYSTEMONE_FAIL_OPEN ?? "")
 const DIFF_CAP = 12000
 
 const QUESTIONS = {
@@ -48,30 +49,47 @@ const QUESTIONS = {
 }
 
 function stagedDiff(): string {
-  const { execSync } = require("node:child_process")
   try {
     return execSync("git diff --cached --unified=0", {
       encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024,
     }).slice(0, DIFF_CAP)
-  } catch {
-    return ""
+  } catch (err) {
+    // Fail-closed: a git failure must not silently skip the judgement.
+    throw new Error(`git diff --cached failed: ${String(err).slice(0, 200)}`)
   }
 }
 
 async function main(): Promise<number> {
+  if (process.argv[2] !== "pre-commit") {
+    process.stderr.write(
+      `usage: guardrails-md pre-commit\n` +
+        `  (runs the staged diff through the decision model before the commit is allowed)\n`,
+    )
+    return 2
+  }
+
   const diff = stagedDiff()
   if (!diff.trim()) return 0 // nothing staged
 
   const gate = createGate(
     {
       name: "git",
+      label: "git",
+      label: "git",
       authPath: `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/auth.json`,
       guardrailPaths: ["guardrails.md", ".opencode/guardrails.md", ".pi/guardrails.md"],
       logPath: `${process.env.HOME}/.cache/guardrails-md/pre-commit.log`,
     },
     process.cwd(),
   )
+
+  if (!gate.hasCredential()) {
+    process.stderr.write(
+      `guardrails-md: inactive — no credential (BERGET_API_KEY or harness login). Commit not judged.\n`,
+    )
+    return 0
+  }
 
   const block = await gate.checkDiff(diff, QUESTIONS)
   if (!block) return 0

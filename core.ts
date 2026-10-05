@@ -30,7 +30,10 @@ import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
 import { noul, TypeSafeClient } from "@typesafe-ai/sdk"
 
 export interface Harness {
-  name: "opencode" | "pi"
+  /** Machine identifier for the harness ("opencode", "pi", "git", …). */
+  name: string
+  /** Human-readable name used in user-facing messages. */
+  label: string
   authPath: string
   guardrailPaths: string[]
   logPath: string
@@ -373,7 +376,7 @@ export function createGate(harness: Harness, directory: string) {
       reason:
         `SystemOne-gate: cooling down after ${blockCount} blocked command${blockCount === 1 ? "" : "s"} — ` +
         `next attempt in ~${formatWait(remainingMs)}. The wait doubles with every block; ` +
-        `restarting ${harness.name} resets it.`,
+        `restarting ${harness.label} resets it.`,
     }
   }
 
@@ -460,8 +463,6 @@ export function createGate(harness: Harness, directory: string) {
     if (process.env.SYSTEMONE_GATE === "off") return null
     const client = resolveClient()
     if (!client) return null
-    const cooling = cooldownBlock()
-    if (cooling) return cooling
 
     const state =
       "Staged changes about to be committed to the git repository:\n" + diff +

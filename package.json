@@ -10,11 +10,13 @@
   },
   "files": [
     "core.ts",
-    "adapters/",
+    "adapters/opencode.ts",
+    "adapters/pi.ts",
     "cli.ts",
     "cli.js",
     "README.md",
-    "guardrails.example.md"
+    "guardrails.example.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [

@@ -126,5 +126,7 @@ Or chain it from your global pre-commit hook (or create one):
 npx guardrails-md pre-commit || exit 1
 ```
 
-Same env config as the plugin. Fail-closed by default: if the endpoint is
-unreachable the commit is blocked — retry, or set `SYSTEMONE_FAIL_OPEN=1`.
+Same env config as the plugin (`SYSTEMONE_THRESHOLD`, `SYSTEMONE_FAIL_OPEN`,
+`SYSTEMONE_LOG` — see [Configuration](#configuration)). Fail-closed by
+default: if the endpoint is unreachable the commit is blocked — retry, or
+set `SYSTEMONE_FAIL_OPEN=1`.
