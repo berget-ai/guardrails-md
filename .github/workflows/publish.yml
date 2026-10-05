@@ -37,9 +37,23 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       # The plugin ships as raw TypeScript (opencode transpiles it on load);
-      # a parse check is the whole "build".
-      - name: Parse check
-        run: npx --yes esbuild index.ts --outfile=/dev/null
+      # a parse check is the whole "build". --bundle forces esbuild to
+      # RESOLVE relative imports — a plain parse accepts index.ts even when
+      # ./internals.js is missing from the package, which is exactly the
+      # breakage the files-whitelist below must never ship.
+      - name: Parse + import-resolution check
+        run: npx --yes esbuild --bundle index.ts --outfile=/dev/null --external:@typesafe-ai/sdk --external:@opencode-ai/plugin "--external:node:*"
+
+      # The package ships raw .ts via a files whitelist; forgetting a module
+      # there publishes a plugin that fails to load for every user. Assert
+      # the tarball actually contains every runtime module index.ts imports.
+      - name: Tarball contains all runtime modules
+        run: |
+          PACKED=$(npm pack --dry-run --json)
+          for f in index.ts internals.ts; do
+            echo "$PACKED" | grep -q "\"$f\"" || { echo "::error ::$f missing from npm tarball (check package.json files)"; exit 1; }
+          done
+          echo "tarball OK: index.ts + internals.ts present"
 
       # Version bumps happen via a normal PR (main is protected). This
       # workflow publishes whatever package.json currently says.
