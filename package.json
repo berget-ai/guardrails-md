@@ -4,7 +4,9 @@
   "description": "guardrails.md gate for opencode and pi: a System One decision model (TypeSafe Jev) judges every bash command before it runs — destructive / credentials / guardrails.md policy",
   "type": "module",
   "exports": {
-    ".": "./adapters/opencode.ts"
+    ".": "./adapters/opencode.ts",
+    "./opencode": "./adapters/opencode.ts",
+    "./pi": "./adapters/pi.ts"
   },
   "files": [
     "core.ts",
