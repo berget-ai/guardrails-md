@@ -302,14 +302,14 @@ function endpointReason(status: number | undefined): string {
   return "endpoint unreachable"
 }
 
-async function judgeOrThrow(ctx: JudgeContext): Promise<Verdict> {
+async function judgeOrThrow(ctx: JudgeContext): Promise<Verdict | null> {
   try {
     return await judge(ctx)
   } catch (err) {
     const reason = endpointReason((err as { status?: number }).status)
     const decision = FAIL_OPEN ? "fail-open" : "fail-closed"
     log({ ts: new Date().toISOString(), command: ctx.command, error: String(err), decision })
-    if (FAIL_OPEN) return { destructive: 0, credentials: 0 } // availability over strictness
+    if (FAIL_OPEN) return null // explicit opt-out: availability over strictness
     throw new Error(
       `SystemOne-gate: ${reason} — command blocked.\n` +
         `  ${ctx.command.slice(0, 200)}\n` +
@@ -424,7 +424,6 @@ function blockMessage(outcome: Outcome, hasGuardrails: boolean): string {
       `\n  pass in the MAY section, then restart opencode.`
   return (
     `SystemOne-gate: blocked command — ${outcome.kind}=${outcome.worst.toFixed(2)} > ${THRESHOLD}\n` +
-    `  ${""}` +
     perKind +
     bootstrap
   )
@@ -456,6 +455,7 @@ export default (async ({ directory }) => {
 
       const guardrails = readGuardrails(directory)
       const verdict = await judgeOrThrow({ client, command, guardrails })
+      if (!verdict) return // fail-open already logged exactly once
 
       const outcome = decide(verdict, !!guardrails)
       if (outcome.decision === "BLOCK") registerBlock()
