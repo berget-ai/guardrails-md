@@ -106,6 +106,31 @@ From now on, every bash command your agent runs has to pass your guardrails
 before it is allowed. Above the threshold the command is blocked with an
 explanation the agent can read; below it, it runs.
 
+## Git pre-commit hook
+
+The same judgement works as a git pre-commit hook: every commit's staged
+diff is scored before it enters the repository. Personal data (GDPR) and
+secrets are blocked; the team's own names in bylines and author fields pass.
+
+Install for every repo on your machine (uses your global `core.hooksPath` if
+you have one, otherwise copy to `.git/hooks/pre-commit` per repo):
+
+```sh
+curl -o ~/.git-hooks/guardrails-pre-commit \
+  https://raw.githubusercontent.com/berget-ai/guardrails-md/main/hooks/pre-commit
+chmod +x ~/.git-hooks/guardrails-pre-commit
+```
+
+Then chain it from your global pre-commit hook (or create one):
+
+```bash
+# ~/.git-hooks/pre-commit
+python3 ~/.git-hooks/guardrails-pre-commit || exit 1
+```
+
+Same env config as the plugin. Fail-closed by default: if the endpoint is
+unreachable the commit is blocked — retry, or set `SYSTEMONE_FAIL_OPEN=1`.
+
 ## Why a model and not a regex
 
 A deny-list of patterns knows `rm -rf`. It does not know that your team
