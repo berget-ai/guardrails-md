@@ -1,4 +1,4 @@
-# opencode-systemone-gate
+# guardrails-md
 
 Stops your coding agent from running the bash command you'd regret.
 
@@ -40,7 +40,7 @@ Add the plugin to `opencode.json` (global or per project):
 
 ```json
 {
-  "plugin": ["@bergetai/opencode-systemone-gate"]
+  "plugin": ["@bergetai/guardrails-md"]
 }
 ```
 

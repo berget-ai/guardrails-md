@@ -11,7 +11,7 @@ We aim to acknowledge reports within two business days.
 ## Scope
 
 - The plugin code in this repository (index.ts).
-- The published npm package `@bergetai/opencode-systemone-gate`.
+- The published npm package `opencode-guardrails-md`.
 
 ## Known limitations (by design, documented in the README)
 
