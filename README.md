@@ -241,17 +241,17 @@ credentials, sandboxes and human review still matter.
 | Variable | Default | Meaning |
 |---|---|---|
 | (seat token) | auto | Berget seat auth from the harness's login (see [Harness differences](#harness-differences)) |
-| `BERGET_API_KEY` | – | Bearer token for CI/headless |
-| `BERGET_BASE_URL` | `https://api.berget.ai` | Gateway root or full `/v1/systemone` URL |
-| `BERGET_MODEL` | `berget/bev` | Model id as exposed by the gateway |
+| `BERGET_API_KEY` | – | Bearer token for CI/headless (fallback: `TYPESAFE_API_KEY`) |
+| `BERGET_BASE_URL` | `https://api.berget.ai` | Gateway root or full `/v1/systemone` URL (fallback: `TYPESAFE_BASE_URL`) |
+| `BERGET_MODEL` | `berget/bev` | Model id as exposed by the gateway (fallback: `TYPESAFE_DEFAULT_MODEL`) |
 | `SYSTEMONE_THRESHOLD` | `0.7` | Block threshold (0–1) |
 | `SYSTEMONE_FAIL_OPEN` | – | Set to `1` to let commands run when the endpoint is unreachable (default is fail-closed) |
 | `SYSTEMONE_GATE` | – | Set to `off` to disable the gate |
 | `SYSTEMONE_LOG` | – | Set to `1` to write the audit log |
 
-Credentials resolve per request: seat token, then `BERGET_API_KEY`. With no
-credential at all the gate stays inactive (see
-[Harness differences](#harness-differences) for how each harness reports it).
+Credentials resolve per request: seat token, then `BERGET_API_KEY`, then
+`TYPESAFE_API_KEY`. With no credential at all the gate logs one line and
+stays inactive.
 
 ## Circumvention slows itself down
 

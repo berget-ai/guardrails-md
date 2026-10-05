@@ -108,6 +108,7 @@ describe("pi adapter", () => {
 
   it("Given no credential, When bash is called twice, Then the human is warned once that the gate is inactive", async () => {
     vi.stubEnv("BERGET_API_KEY", undefined)
+    vi.stubEnv("TYPESAFE_API_KEY", undefined)
     const handler = await loadHandler()
     await expect(handler(bash("rm -rf /data"), ctx)).resolves.toBeUndefined()
     await handler(bash("ls"), ctx)
@@ -123,6 +124,7 @@ describe("pi adapter", () => {
 
   it("Given an empty BERGET_API_KEY and no login, When bash is called, Then the human is warned the gate is inactive", async () => {
     vi.stubEnv("BERGET_API_KEY", "")
+    vi.stubEnv("TYPESAFE_API_KEY", undefined)
     const handler = await loadHandler()
     await handler(bash("ls"), ctx)
     expect(notify).toHaveBeenCalledWith(expect.stringMatching(/inactive/), "warning")
