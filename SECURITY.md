@@ -10,7 +10,8 @@ We aim to acknowledge reports within two business days.
 
 ## Scope
 
-- The plugin code in this repository (index.ts).
+- The gate code in this repository (core.ts and the opencode and pi adapters
+  in adapters/).
 - The published npm package `@bergetai/opencode-guardrails-md`.
 
 ## Known limitations (by design, documented in the README)
@@ -18,9 +19,13 @@ We aim to acknowledge reports within two business days.
 These are documented design decisions, not vulnerabilities — but if you
 find a way to break the stated guarantees, we want to hear about it:
 
-- The gate judges bash commands only; file edits pass through.
+- The gate judges bash commands only; file edits pass through. In pi, the
+  `powershell` tool is not gated.
 - `guardrails.md` is read once at session start but lives in the repo —
-  an agent with edit access can weaken the rules for the next session.
+  an agent with edit access can weaken the rules for the next session,
+  including by padding the file so rules fall past the 2000-character
+  limit. The gate warns when the file is cut, but does not apply the cut
+  rules.
 - The gate does not decode obfuscated payloads (base64 etc.).
 - The model is a trained classifier (~96% on held-out tests) and errs in
   both directions.
