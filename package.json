@@ -1,7 +1,7 @@
 {
-  "name": "@bergetai/opencode-guardrails-md",
+  "name": "guardrails-md",
   "version": "0.6.0",
-  "description": "guardrails.md gate for opencode and pi: a System One decision model (TypeSafe Jev) judges every bash command before it runs — destructive / credentials / guardrails.md policy",
+  "description": "guardrails.md \u2014 a decision-model gate for coding agents. CLI (pre-commit hook) + opencode plugin. Every command and commit passes your guardrails before it is allowed.",
   "type": "module",
   "exports": {
     ".": "./adapters/opencode.ts",
@@ -10,8 +10,9 @@
   },
   "files": [
     "core.ts",
-    "adapters/opencode.ts",
-    "adapters/pi.ts",
+    "adapters/",
+    "cli.ts",
+    "cli.js",
     "README.md",
     "guardrails.example.md"
   ],
@@ -21,14 +22,13 @@
     ]
   },
   "keywords": [
-    "opencode",
-    "opencode-plugin",
-    "pi",
-    "systemone",
-    "safety",
     "guardrails",
-    "bash",
-    "security"
+    "cli",
+    "pre-commit",
+    "git",
+    "decision-model",
+    "systemone",
+    "safety"
   ],
   "license": "MIT",
   "publishConfig": {
@@ -55,5 +55,8 @@
   },
   "devDependencies": {
     "vitest": "^5.0.3"
+  },
+  "bin": {
+    "guardrails-md": "./cli.js"
   }
 }
