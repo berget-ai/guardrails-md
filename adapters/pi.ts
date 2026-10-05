@@ -2,7 +2,8 @@
  * guardrails-md for pi — gates every bash tool call through core.ts before it
  * runs, including calls a codemode script makes. A block returns
  * { block, reason } to the agent and warns the human. Without a credential
- * the gate is inactive, and the human is told once.
+ * the gate is inactive, and the human is told once. Config warnings (bad
+ * threshold, truncated guardrails.md) are shown when a session starts.
  *
  * Credentials: pi's own resolution for the "berget" provider first (OAuth or
  * API-key login), then the berget OAuth entry in pi's auth.json
@@ -36,6 +37,10 @@ export default function guardrailsMd(api: ExtensionAPI) {
   let warnedInactive = false
   const silentlyInactive = (key: string | undefined) =>
     !warnedInactive && process.env.SYSTEMONE_GATE !== "off" && !gate.hasCredential(key)
+
+  api.on("session_start", async (_event, ctx) => {
+    for (const warning of gate.warnings) warn(ctx, warning)
+  })
 
   api.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return

@@ -67,7 +67,9 @@ shape:
 
 The gate reads the file once at session start, so restart the harness after
 editing. Only the first 2000 characters are sent to the model, so keep the
-file short and put the important rules first.
+file short and put the MUST NOT rules first. If the file is longer, the gate
+warns you at startup and in every block message, and the rules after the cut
+are not applied.
 See [`guardrails.example.md`](guardrails.example.md).
 
 **2. Install the gate in your harness.**
@@ -179,8 +181,8 @@ for the *next* session. Treat `guardrails.md` changes as code review, and
 unattended agents should treat the file as untrusted input. Your overrides:
 
 - **Once:** restart the harness with `SYSTEMONE_GATE=off` and redo the step.
-- **Tune:** raise `SYSTEMONE_THRESHOLD` if the gate is too jumpy for your
-  taste.
+- **Tune:** raise `SYSTEMONE_THRESHOLD` (it must stay below 1) if the gate
+  is too jumpy for your taste.
 - **Fix the policy:** if the block is a false positive against your rules,
   change `guardrails.md`. That is the durable fix, and since the file lives
   in the repo, the change goes through review like any other edit.
@@ -244,7 +246,7 @@ credentials, sandboxes and human review still matter.
 | `BERGET_API_KEY` | – | Bearer token for CI/headless (fallback: `TYPESAFE_API_KEY`) |
 | `BERGET_BASE_URL` | `https://api.berget.ai` | Gateway root or full `/v1/systemone` URL (fallback: `TYPESAFE_BASE_URL`) |
 | `BERGET_MODEL` | `berget/bev` | Model id as exposed by the gateway (fallback: `TYPESAFE_DEFAULT_MODEL`) |
-| `SYSTEMONE_THRESHOLD` | `0.7` | Block threshold (0–1) |
+| `SYSTEMONE_THRESHOLD` | `0.7` | Block threshold, strictly between 0 and 1. Anything else (`abc`, empty, `0`, `1`, …) falls back to `0.7` with a warning |
 | `SYSTEMONE_FAIL_OPEN` | – | Set to `1` to let commands run when the endpoint is unreachable (default is fail-closed) |
 | `SYSTEMONE_GATE` | – | Set to `off` to disable the gate |
 | `SYSTEMONE_LOG` | – | Set to `1` to write the audit log |

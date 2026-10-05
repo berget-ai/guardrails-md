@@ -22,7 +22,10 @@ find a way to break the stated guarantees, we want to hear about it:
 - The gate judges bash commands only; file edits pass through. In pi, the
   `powershell` tool is not gated.
 - `guardrails.md` is read once at session start but lives in the repo —
-  an agent with edit access can weaken the rules for the next session.
+  an agent with edit access can weaken the rules for the next session,
+  including by padding the file so rules fall past the 2000-character
+  limit. The gate warns when the file is cut, but does not apply the cut
+  rules.
 - The gate does not decode obfuscated payloads (base64 etc.).
 - The model is a trained classifier (~96% on held-out tests) and errs in
   both directions.

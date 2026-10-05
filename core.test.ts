@@ -247,6 +247,46 @@ describe("check: harness-resolved key", () => {
   })
 })
 
+describe("startup warnings: SYSTEMONE_THRESHOLD", () => {
+  it.each(["abc", "", "0", "-5", "1", "2"])(
+    "Given SYSTEMONE_THRESHOLD=%j, When the gate is created, Then it warns and falls back to 0.7",
+    async (raw) => {
+      systemOne.mockResolvedValue({ answers: { destructive: { noul: 0.75 }, credentials: { noul: 0 } } })
+      const gate = await makeGate({ SYSTEMONE_THRESHOLD: raw })
+      expect(gate.warnings).toEqual([expect.stringMatching(/SYSTEMONE_THRESHOLD.*using 0\.7/)])
+      await expect(gate.check("x")).resolves.toMatchObject({ reason: expect.stringMatching(/destructive=0\.75 > 0\.7/) })
+    },
+  )
+
+  it("Given SYSTEMONE_THRESHOLD=0.5, When the gate is created, Then it is used without a warning", async () => {
+    systemOne.mockResolvedValue({ answers: { destructive: { noul: 0.6 }, credentials: { noul: 0 } } })
+    const gate = await makeGate({ SYSTEMONE_THRESHOLD: "0.5" })
+    expect(gate.warnings).toEqual([])
+    await expect(gate.check("x")).resolves.toMatchObject({ reason: expect.stringMatching(/> 0\.5/) })
+  })
+})
+
+describe("startup warnings: truncated guardrails.md", () => {
+  it("Given guardrails.md over 2000 characters, When the gate is created, Then it warns that later rules are ignored", async () => {
+    seedGuardrails("x".repeat(3000))
+    const gate = await makeGate()
+    expect(gate.warnings).toEqual([expect.stringMatching(/guardrails\.md.*2000 characters.*ignored/)])
+  })
+
+  it("Given a truncated guardrails.md, When a command is blocked, Then the reason carries the truncation warning", async () => {
+    seedGuardrails("x".repeat(3000))
+    systemOne.mockResolvedValue(blockDestructive)
+    const gate = await makeGate()
+    await expect(gate.check("rm -rf /data")).resolves.toMatchObject({ reason: expect.stringMatching(/2000 characters/) })
+  })
+
+  it("Given a short guardrails.md and a valid threshold, When the gate is created, Then there are no warnings", async () => {
+    seedGuardrails("# rules")
+    const gate = await makeGate()
+    expect(gate.warnings).toEqual([])
+  })
+})
+
 describe("check: blocking", () => {
   it("blocks above threshold with kind, scores and human-only override", async () => {
     systemOne.mockResolvedValue(blockDestructive)

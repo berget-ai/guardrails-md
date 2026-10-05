@@ -38,7 +38,24 @@ export interface Harness {
 
 export type Block = { reason: string }
 
-const THRESHOLD = Number(process.env.SYSTEMONE_THRESHOLD ?? "0.7")
+const DEFAULT_THRESHOLD = 0.7
+
+// Out-of-range values fail silently otherwise: "abc" (NaN) or anything ≥ 1
+// never blocks, while "", 0 or negatives block everything.
+function parseThreshold(raw: string | undefined): { value: number; warning?: string } {
+  if (raw === undefined) return { value: DEFAULT_THRESHOLD }
+  const value = Number(raw)
+  if (raw.trim() !== "" && value > 0 && value < 1) return { value }
+  return {
+    value: DEFAULT_THRESHOLD,
+    warning:
+      `SystemOne-gate: SYSTEMONE_THRESHOLD=${JSON.stringify(raw)} is not a number between 0 and 1 — ` +
+      `using ${DEFAULT_THRESHOLD}.`,
+  }
+}
+
+const threshold = parseThreshold(process.env.SYSTEMONE_THRESHOLD)
+const THRESHOLD = threshold.value
 // Endpoint failure policy. Default is FAIL-CLOSED: if the endpoint cannot
 // be reached, the command is blocked. Fail-open would be an agent-reachable
 // kill switch — an agent can induce the failure (hammer the endpoint until
@@ -48,6 +65,7 @@ const THRESHOLD = Number(process.env.SYSTEMONE_THRESHOLD ?? "0.7")
 // strictness can set SYSTEMONE_FAIL_OPEN=1.
 const FAIL_OPEN = /^(1|true|yes)$/i.test(process.env.SYSTEMONE_FAIL_OPEN ?? "")
 const GUARDRAILS_MAX = 2000 // chars — keep the state text tight
+const TRUNCATED = "\n… (truncated)"
 const SCRIPT_MAX = 4000 // chars of file content included per file
 const SCRIPT_FILES_MAX = 3 // files read per command
 
@@ -74,7 +92,7 @@ export function readGuardrails(directory: string, paths: string[]): string | nul
   for (const p of paths) {
     try {
       let text = readFileSync(`${directory}/${p}`, "utf8").trim()
-      if (text.length > GUARDRAILS_MAX) text = text.slice(0, GUARDRAILS_MAX) + "\n… (truncated)"
+      if (text.length > GUARDRAILS_MAX) text = text.slice(0, GUARDRAILS_MAX) + TRUNCATED
       return text
     } catch {}
   }
@@ -188,7 +206,7 @@ function readableFile(token: string): string | null {
     if (!st.isFile() || st.size > 1_000_000) return null
     let text = readFileSync(path, "utf8")
     if (text.includes("\0")) return null // binary — utf8 garbage adds nothing
-    if (text.length > SCRIPT_MAX) text = text.slice(0, SCRIPT_MAX) + "\n… (truncated)"
+    if (text.length > SCRIPT_MAX) text = text.slice(0, SCRIPT_MAX) + TRUNCATED
     return `--- ${path} ---\n${text}`
   } catch {
     return null
@@ -322,6 +340,15 @@ export function createGate(harness: Harness, directory: string) {
   // its own rules.
   const guardrails = readGuardrails(directory, harness.guardrailPaths)
   const hasGuardrails = !!guardrails
+  // A truncated policy is applied as if complete, so rules past the cut are
+  // silently dropped — an agent can push them there by padding the file.
+  const warnings = [
+    threshold.warning,
+    guardrails?.endsWith(TRUNCATED)
+      ? `SystemOne-gate: guardrails.md is longer than ${GUARDRAILS_MAX} characters — rules after that are ignored. ` +
+        `Shorten it or put the MUST NOT rules first.`
+      : undefined,
+  ].filter((w): w is string => w !== undefined)
   let blockCount = 0
   let lastBlockAt = 0
   let cooldownUntil = 0
@@ -366,6 +393,12 @@ export function createGate(harness: Harness, directory: string) {
   }
 
   async function check(command: string, resolvedKey?: string): Promise<Block | null> {
+    const block = await judgeCommand(command, resolvedKey)
+    if (!block || warnings.length === 0) return block
+    return { reason: [block.reason, ...warnings.map((w) => `  ${w}`)].join("\n") }
+  }
+
+  async function judgeCommand(command: string, resolvedKey?: string): Promise<Block | null> {
     if (process.env.SYSTEMONE_GATE === "off") return null
     const client = resolveClient(resolvedKey)
     if (!client) return null
@@ -416,5 +449,5 @@ export function createGate(harness: Harness, directory: string) {
     return !!apiKey(harness.authPath, resolvedKey)
   }
 
-  return { check, hasCredential }
+  return { check, hasCredential, warnings }
 }

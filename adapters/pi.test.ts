@@ -20,12 +20,20 @@ const getApiKeyForProvider = vi.fn()
 const ctx = { hasUI: true, ui: { notify }, modelRegistry: { getApiKeyForProvider } }
 const printCtx = { ...ctx, hasUI: false }
 
-async function loadHandler(): Promise<Handler> {
+async function loadHandlers(): Promise<Record<string, Handler>> {
   const handlers: Record<string, Handler> = {}
   const api = { on: (name: string, handler: Handler) => (handlers[name] = handler) }
   const mod = await import("./pi.ts")
   mod.default(api as never)
-  return handlers.tool_call
+  return handlers
+}
+
+async function loadHandler(): Promise<Handler> {
+  return (await loadHandlers()).tool_call
+}
+
+async function loadSessionStart(): Promise<(event: unknown, ctx: unknown) => Promise<void>> {
+  return (await loadHandlers()).session_start as never
 }
 
 function bash(command: string, parentToolCallId?: string): ToolCall {
@@ -175,6 +183,21 @@ describe("pi adapter", () => {
     const handler = await loadHandler()
     await handler(bash("ls"), printCtx)
     expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/inactive/))
+  })
+
+  it("Given an invalid SYSTEMONE_THRESHOLD, When a session starts, Then the human is warned", async () => {
+    vi.stubEnv("SYSTEMONE_THRESHOLD", "abc")
+    const sessionStart = await loadSessionStart()
+    await sessionStart({ type: "session_start" }, ctx)
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/SYSTEMONE_THRESHOLD/), "warning")
+  })
+
+  it("Given print mode and an invalid SYSTEMONE_THRESHOLD, When a session starts, Then the warning goes to stderr", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true)
+    vi.stubEnv("SYSTEMONE_THRESHOLD", "abc")
+    const sessionStart = await loadSessionStart()
+    await sessionStart({ type: "session_start" }, printCtx)
+    expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/SYSTEMONE_THRESHOLD/))
   })
 
   it("Given PI_CODING_AGENT_DIR, When bash is called, Then the seat token is read from there", async () => {

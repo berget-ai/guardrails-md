@@ -1,6 +1,8 @@
 /**
  * guardrails-md for opencode — gates every bash command through core.ts
  * before it runs. A block throws, and opencode hands the message to the agent.
+ * Config warnings (bad threshold, truncated guardrails.md) are shown as a
+ * toast at load.
  *
  * Seat token: opencode's auth storage, maintained by @bergetai/opencode-auth.
  * Guardrails: guardrails.md or .opencode/guardrails.md, frozen at plugin load.
@@ -19,8 +21,13 @@ function opencode(): Harness {
   }
 }
 
-export const SystemOneGate = (async ({ directory }) => {
+export const SystemOneGate = (async ({ directory, client }) => {
   const gate = createGate(opencode(), directory)
+  // Best effort: the TUI may not be up yet, and every block reason repeats
+  // these warnings anyway.
+  for (const message of gate.warnings) {
+    Promise.resolve(client?.tui?.showToast?.({ body: { message, variant: "warning" } })).catch(() => {})
+  }
   return {
     "tool.execute.before": async (input, output) => {
       if (input.tool !== "bash") return
