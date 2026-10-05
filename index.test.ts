@@ -199,7 +199,7 @@ describe("judge", () => {
   it("includes guardrails in the state and adds the violation question", async () => {
     seedGuardrails("# rules")
     const { __internals } = await loadPlugin()
-    await __internals.judge(await client(), "ls -la", "# rules")
+    await __internals.judge({ client: await client(), command: "ls -la", guardrails: "# rules" })
     const req = systemOne.mock.calls[0][0]
     expect(req.state.text).toContain("ls -la")
     expect(req.state.text).toContain("# rules")
@@ -207,13 +207,13 @@ describe("judge", () => {
   })
   it("omits the violation question without guardrails", async () => {
     const { __internals } = await loadPlugin()
-    await __internals.judge(await client(), "ls -la", null)
+    await __internals.judge({ client: await client(), command: "ls -la", guardrails: null })
     expect(Object.keys(systemOne.mock.calls[0][0].questions)).not.toContain("guardrails_violation")
   })
   it("defaults missing answers to 0", async () => {
     systemOne.mockResolvedValue({ answers: {} })
     const { __internals } = await loadPlugin()
-    const v = await __internals.judge(await client(), "ls", null)
+    const v = await __internals.judge({ client: await client(), command: "ls", guardrails: null })
     expect(v.destructive).toBe(0)
     expect(v.credentials).toBe(0)
     expect(v.guardrails_violation).toBeUndefined()
