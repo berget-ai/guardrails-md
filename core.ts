@@ -110,12 +110,13 @@ export function seatToken(authPath: string): string | null {
   return auth.access
 }
 
-function apiKey(authPath: string): string | undefined {
-  return seatToken(authPath) ?? process.env.BERGET_API_KEY ?? process.env.TYPESAFE_API_KEY
+// A harness that resolves credentials itself (pi's own login store) passes
+// the key in; it wins over reading the harness's auth file directly.
+function apiKey(authPath: string, resolvedKey?: string): string | undefined {
+  return resolvedKey || (seatToken(authPath) ?? process.env.BERGET_API_KEY ?? process.env.TYPESAFE_API_KEY)
 }
 
-function newClient(authPath: string): TypeSafeClient | null {
-  const key = apiKey(authPath)
+function newClient(key: string | undefined): TypeSafeClient | null {
   if (!key) return null
   return new TypeSafeClient({
     apiKey: key,
@@ -351,8 +352,8 @@ export function createGate(harness: Harness, directory: string) {
 
   // Credentials resolve lazily: the seat token can appear or be refreshed
   // mid-session.
-  function resolveClient(): TypeSafeClient | null {
-    const client = newClient(harness.authPath)
+  function resolveClient(resolvedKey?: string): TypeSafeClient | null {
+    const client = newClient(apiKey(harness.authPath, resolvedKey))
     if (client) return client
     if (!loggedInactive) {
       log(harness.logPath, {
@@ -364,9 +365,9 @@ export function createGate(harness: Harness, directory: string) {
     return null
   }
 
-  async function check(command: string): Promise<Block | null> {
+  async function check(command: string, resolvedKey?: string): Promise<Block | null> {
     if (process.env.SYSTEMONE_GATE === "off") return null
-    const client = resolveClient()
+    const client = resolveClient(resolvedKey)
     if (!client) return null
     if (!command) return null
     const cooling = cooldownBlock()
@@ -411,8 +412,8 @@ export function createGate(harness: Harness, directory: string) {
     return { reason: blockMessage(outcome, hasGuardrails, harness.name) + `\n  ${command.slice(0, 200)}` }
   }
 
-  function hasCredential(): boolean {
-    return !!apiKey(harness.authPath)
+  function hasCredential(resolvedKey?: string): boolean {
+    return !!apiKey(harness.authPath, resolvedKey)
   }
 
   return { check, hasCredential }

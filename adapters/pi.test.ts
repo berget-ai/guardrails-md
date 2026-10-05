@@ -16,7 +16,9 @@ const blockDestructive = { answers: { destructive: { noul: 0.98 }, credentials: 
 let dir: string
 let home: string
 const notify = vi.fn()
-const ctx = { ui: { notify } }
+const getApiKeyForProvider = vi.fn()
+const ctx = { hasUI: true, ui: { notify }, modelRegistry: { getApiKeyForProvider } }
+const printCtx = { ...ctx, hasUI: false }
 
 async function loadHandler(): Promise<Handler> {
   const handlers: Record<string, Handler> = {}
@@ -41,6 +43,7 @@ beforeEach(() => {
   vi.stubEnv("SYSTEMONE_GATE", undefined)
   vi.spyOn(process, "cwd").mockReturnValue(dir)
   systemOne.mockResolvedValue(structuredClone(allow))
+  getApiKeyForProvider.mockResolvedValue(undefined)
   sdk.configs.length = 0
 })
 
@@ -134,6 +137,44 @@ describe("pi adapter", () => {
     systemOne.mockRejectedValue(new Error("gateway down"))
     const handler = await loadHandler()
     await expect(handler(bash("ls"), ctx)).resolves.toMatchObject({ block: true, reason: expect.stringMatching(/endpoint unreachable/) })
+  })
+
+  it("Given a pi API-key login for Berget, When bash is called, Then the SDK gets the key pi resolves", async () => {
+    getApiKeyForProvider.mockResolvedValue("pi-api-key")
+    vi.stubEnv("BERGET_API_KEY", undefined)
+    vi.stubEnv("TYPESAFE_API_KEY", undefined)
+    const handler = await loadHandler()
+    await handler(bash("ls"), ctx)
+    expect(getApiKeyForProvider).toHaveBeenCalledWith("berget")
+    expect(sdk.configs[0]?.apiKey).toBe("pi-api-key")
+  })
+
+  it("Given a pi-resolved key, When bash is called, Then no inactive warning is shown", async () => {
+    getApiKeyForProvider.mockResolvedValue("pi-api-key")
+    vi.stubEnv("BERGET_API_KEY", undefined)
+    vi.stubEnv("TYPESAFE_API_KEY", undefined)
+    const handler = await loadHandler()
+    await handler(bash("ls"), ctx)
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it("Given print mode without UI, When a command is blocked, Then the warning goes to stderr", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true)
+    systemOne.mockResolvedValue(blockDestructive)
+    const handler = await loadHandler()
+    const result = await handler(bash("rm -rf /data"), printCtx)
+    expect(result?.block).toBe(true)
+    expect(notify).not.toHaveBeenCalled()
+    expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/^SystemOne-gate: blocked command/))
+  })
+
+  it("Given print mode and no credential, When bash is called, Then the inactive warning goes to stderr", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true)
+    vi.stubEnv("BERGET_API_KEY", undefined)
+    vi.stubEnv("TYPESAFE_API_KEY", undefined)
+    const handler = await loadHandler()
+    await handler(bash("ls"), printCtx)
+    expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/inactive/))
   })
 
   it("Given PI_CODING_AGENT_DIR, When bash is called, Then the seat token is read from there", async () => {

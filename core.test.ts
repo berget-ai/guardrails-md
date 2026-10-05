@@ -237,6 +237,16 @@ describe("check: happy path", () => {
   })
 })
 
+describe("check: harness-resolved key", () => {
+  it("Given a key resolved by the harness, When a command is checked, Then it is used before the seat token and env keys", async () => {
+    seedAuth({ berget: { type: "oauth", access: "seat-tok", expires: Date.now() + 60_000 } })
+    const gate = await makeGate()
+    await gate.check("ls", "harness-key")
+    expect(sdk.configs[0]?.apiKey).toBe("harness-key")
+    expect(gate.hasCredential("harness-key")).toBe(true)
+  })
+})
+
 describe("check: blocking", () => {
   it("blocks above threshold with kind, scores and human-only override", async () => {
     systemOne.mockResolvedValue(blockDestructive)

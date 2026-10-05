@@ -317,9 +317,9 @@ cooldown and fail-closed default. What differs is where the gate looks.
 | | opencode | pi |
 |---|---|---|
 | Hook | `tool.execute.before`, bash only | `tool_call`, bash only, including calls a codemode script makes |
-| On block | throws; the agent reads the message | returns `{ block, reason }` to the agent and shows a warning to you |
-| Without a credential | inactive; one log line with `SYSTEMONE_LOG=1` | inactive; warns you once per session |
-| Seat token | `$XDG_DATA_HOME/opencode/auth.json` (default `~/.local/share`) | `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent`) |
+| On block | throws; the agent reads the message | returns `{ block, reason }` to the agent and shows a warning to you (on stderr in `pi -p`) |
+| Without a credential | inactive; one log line with `SYSTEMONE_LOG=1` | inactive; warns you once per session (on stderr in `pi -p`) |
+| Seat token | `$XDG_DATA_HOME/opencode/auth.json` (default `~/.local/share`) | pi's Berget login, OAuth or API key, resolved by pi itself; then the OAuth entry in `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent`) |
 | Policy file | `guardrails.md`, then `.opencode/guardrails.md` | `guardrails.md`, then `.pi/guardrails.md` |
 | Policy read from | the project directory opencode passes the plugin | the directory pi was started in |
 | Audit log | `~/.cache/opencode/systemone-gate.log` | `~/.cache/pi/systemone-gate.log` |
