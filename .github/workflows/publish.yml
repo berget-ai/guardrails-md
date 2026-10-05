@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: read
       # OIDC trusted publishing (npmjs.com → @bergetai → Trusted Publisher:
-      # berget-ai/opencode-systemone-gate / publish.yml). No NPM_TOKEN
+      # berget-ai/guardrails-md / publish.yml). No NPM_TOKEN
       # needed — the classic token route expired (misleading 404/401 on
       # publish).
       id-token: write

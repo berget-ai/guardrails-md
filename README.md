@@ -1,4 +1,4 @@
-# opencode-systemone-gate
+# guardrails-md
 
 Stops your coding agent from running the bash command you'd regret.
 
@@ -34,13 +34,46 @@ promise that the agent cannot be persuaded — it promises that the boundary
 holds anyway, because the gate judges the command and your rules, not the
 conversation that led to it.
 
-## Try it
+## Quickstart
 
-Add the plugin to `opencode.json` (global or per project):
+Two steps. First teach the gate your rules, then put it in the harness.
+
+**1. Add `guardrails.md` to your repo** (root, or `.opencode/guardrails.md`).
+Write it yourself — the value is in deciding what your team actually allows,
+not in shipping a generic file. The example below is a starting point for the
+shape:
+
+```markdown
+# Guardrails for agents in this repo
+
+## The agent MUST NOT
+
+- Edit this file (guardrails.md) itself — it is written and changed by humans, through review.
+- Change anything in production — production changes reach production only through Git/CD.
+- Push directly to the main branch — all changes go through pull request.
+- Install software outside the project's declared dependencies.
+- Send data to external services outside our approved list (docs/approved-domains.md).
+- Run irreversible operations against shared systems — deletions, cleanup, resets.
+
+## The agent MAY
+
+- Inspect any environment read-only.
+- Run tests, lint, and builds locally.
+- Create branches and push feature branches.
+- Read documentation from the approved sources in docs/approved-domains.md.
+```
+
+The gate reads the file once at session start, so restart opencode after
+editing. Only the first 2000 characters are sent to the model, so keep the
+file short and put the important rules first.
+See [`guardrails.example.md`](guardrails.example.md).
+
+**2. Install the gate in your harness.** For opencode, add the plugin to
+`opencode.json` (global or per project):
 
 ```json
 {
-  "plugin": ["@bergetai/opencode-systemone-gate"]
+  "plugin": ["opencode-guardrails-md"]
 }
 ```
 
@@ -51,10 +84,14 @@ export BERGET_API_KEY=…
 ```
 
 Keys come from [berget.ai](https://berget.ai). The free tier includes €5 of
-credit, and a gate call is small enough that it lasts a long time. If you already use Berget Code
-and are logged in through `@bergetai/opencode-auth`, skip the key: the gate
-picks up your seat token. If you run your own System One-compatible endpoint,
-point `BERGET_BASE_URL` at it instead.
+credit, and a gate call is small enough that it lasts a long time. If you
+already use Berget Code and are logged in through `@bergetai/opencode-auth`,
+skip the key: the gate picks up your seat token. If you run your own
+System One-compatible endpoint, point `BERGET_BASE_URL` at it instead.
+
+From now on, every bash command your agent runs has to pass your guardrails
+before it is allowed. Above the threshold the command is blocked with an
+explanation the agent can read; below it, it runs.
 
 ## Why a model and not a regex
 
@@ -120,38 +157,6 @@ difference matters:
   exceptions do not override them. Those two are the backstop, and
   `guardrails.md` is agent-editable between sessions — a file line must not
   be able to switch the backstop off.
-
-## Team guardrails
-
-Write a `guardrails.md` in the repo root (or `.opencode/guardrails.md`).
-Write it yourself — the value is in deciding what your team actually
-allows, not in shipping a generic file. The example below is a starting
-point for the shape:
-
-```markdown
-# Guardrails for agents in this repo
-
-## The agent MUST NOT
-
-- Edit this file (guardrails.md) itself — it is written and changed by humans, through review.
-- Change anything in production — production changes reach production only through Git/CD.
-- Push directly to the main branch — all changes go through pull request.
-- Install software outside the project's declared dependencies.
-- Send data to external services outside our approved list (docs/approved-domains.md).
-- Run irreversible operations against shared systems — deletions, cleanup, resets.
-
-## The agent MAY
-
-- Inspect any environment read-only.
-- Run tests, lint, and builds locally.
-- Create branches and push feature branches.
-- Read documentation from the approved sources in docs/approved-domains.md.
-```
-
-The gate reads the file once at session start, so restart opencode after
-editing. Only the first 2000 characters are sent to the model, so keep the
-file short and put the important rules first.
-See [`guardrails.example.md`](guardrails.example.md).
 
 ## Overriding a block
 
