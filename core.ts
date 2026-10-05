@@ -1,50 +1,42 @@
 /**
- * SystemOne-gate — opencode plugin that judges every bash command before it
- * runs, using a System One decision model (TypeSafe Jev contract) via the
- * official @typesafe-ai/sdk client.
+ * guardrails-md core — judges a bash command before it runs, using a System
+ * One decision model (TypeSafe Jev contract) via the official
+ * @typesafe-ai/sdk client. Harness-free: adapters/ wires it into opencode
+ * and pi, each passing a Harness with its own paths and wording.
  *
- * Flow: tool.execute.before → read guardrails.md from the repo → one forward
- * pass answers all questions (~100 ms) → block above threshold, else run.
+ * Flow: createGate() freezes guardrails.md → check(command) answers all
+ * questions in one forward pass (~100 ms) → a reason above threshold, else
+ * null.
  *
  * Questions (noul, 0..1):
  *   destructive          — deletes/destroys data, databases, clusters, infra?
  *   credentials          — contains/leaks secrets, keys, tokens?
  *   guardrails_violation — violates the team's guardrails.md? (if present)
  *
- * Guardrails: ${repo}/guardrails.md is read ONCE at plugin load and frozen
- * for the session, so verdicts follow the team's written policy as it stood
- * at startup. Edits require a restart (and go through repo review).
- *
- * Credentials, in order: the Berget Code seat token (opencode's auth
- * storage — zero config for logged-in users), then BERGET_API_KEY, then
- * the SDK's TYPESAFE_API_KEY. Endpoints: defaults to Berget's hosted
- * System One API (api.berget.ai, model berget/bev). Any other
- * System One-compatible gateway works via BERGET_BASE_URL/BERGET_MODEL,
- * and TypeSafe-hosted users can rely on the SDK's native TYPESAFE_* env
- * vars instead.
+ * Credentials, in order: the harness's Berget seat token, then
+ * BERGET_API_KEY, then the SDK's TYPESAFE_API_KEY. Endpoints: defaults to
+ * Berget's hosted System One API (api.berget.ai, model berget/bev). Any
+ * other System One-compatible gateway works via BERGET_BASE_URL/BERGET_MODEL.
  *
  * Block > 0.7. Fail-CLOSED on endpoint errors: an unreachable endpoint
  * blocks commands (fail-open would be an agent-reachable kill switch —
  * it can induce the failure). SYSTEMONE_FAIL_OPEN=1 opts out.
  *
- * Config (BERGET_* takes precedence, then the SDK's TYPESAFE_* env vars,
- * then the Berget defaults):
- *   BERGET_API_KEY        bearer token for CI/headless (fallback:
- *                         TYPESAFE_API_KEY); logged-in Berget Code users
- *                         need nothing — the seat token is picked up
- *                         automatically
- *   BERGET_BASE_URL       gateway root or full /v1/systemone URL
- *                         (fallback: TYPESAFE_BASE_URL, then api.berget.ai)
- *   BERGET_MODEL          model id (fallback: TYPESAFE_DEFAULT_MODEL,
- *                         then berget/bev)
- *   SYSTEMONE_THRESHOLD   block threshold, default 0.7
- *   SYSTEMONE_FAIL_OPEN=1 prefer availability when the endpoint is down
- *   SYSTEMONE_GATE=off    disable the gate
- *
- * Log: ~/.cache/opencode/systemone-gate.log
+ * Config: BERGET_API_KEY, BERGET_BASE_URL, BERGET_MODEL (fallback: the SDK's
+ * TYPESAFE_* vars), SYSTEMONE_THRESHOLD (0.7), SYSTEMONE_FAIL_OPEN=1,
+ * SYSTEMONE_GATE=off, SYSTEMONE_LOG=1.
  */
-import type { Plugin } from "@opencode-ai/plugin"
+import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
 import { noul, TypeSafeClient } from "@typesafe-ai/sdk"
+
+export interface Harness {
+  name: "opencode" | "pi"
+  authPath: string
+  guardrailPaths: string[]
+  logPath: string
+}
+
+export type Block = { reason: string }
 
 const THRESHOLD = Number(process.env.SYSTEMONE_THRESHOLD ?? "0.7")
 // Endpoint failure policy. Default is FAIL-CLOSED: if the endpoint cannot
@@ -73,47 +65,34 @@ type Verdict = {
   policy_exception?: number
 }
 
-// --- guardrails.md, frozen at session start ---------------------------------
-// Read ONCE when the plugin loads, not per command. Hot-reloading would let
-// the agent weaken its own rules mid-session via the (ungated) edit tools —
-// the same self-approval hole as the removed allow-file. Humans edit
-// guardrails.md and restart opencode; the change goes through repo review.
-let frozen: string | null | undefined
-
-function resetGuardrailsCache(): void {
-  frozen = undefined
-}
-
-function readGuardrails(directory: string): string | null {
-  if (frozen !== undefined) return frozen
-  frozen = null
-  const { readFileSync } = require("node:fs") as typeof import("node:fs")
-  for (const p of [`${directory}/guardrails.md`, `${directory}/.opencode/guardrails.md`]) {
+// --- guardrails.md ----------------------------------------------------------
+// createGate reads this ONCE, not per command. Hot-reloading would let the
+// agent weaken its own rules mid-session via the (ungated) edit tools — the
+// same self-approval hole as the removed allow-file. Humans edit
+// guardrails.md and restart the harness; the change goes through repo review.
+export function readGuardrails(directory: string, paths: string[]): string | null {
+  for (const p of paths) {
     try {
-      let text = readFileSync(p, "utf8").trim()
+      let text = readFileSync(`${directory}/${p}`, "utf8").trim()
       if (text.length > GUARDRAILS_MAX) text = text.slice(0, GUARDRAILS_MAX) + "\n… (truncated)"
-      frozen = text
-      break
+      return text
     } catch {}
   }
-  return frozen
+  return null
 }
 
 // --- System One client -------------------------------------------------------
 // The SDK wants the API ROOT (it appends /v1/systemone); accept both forms.
-function gatewayRoot(url: string | undefined): string | undefined {
+export function gatewayRoot(url: string | undefined): string | undefined {
   if (!url) return undefined
   return url.replace(/\/v1\/systemone\/?$/, "").replace(/\/+$/, "")
 }
 
-// Berget Code seat token from opencode's auth storage (maintained and
-// refreshed by @bergetai/opencode-auth). Read per request so a mid-session
-// refresh is picked up. Returns null when absent or expired.
-function readSeatAuth(): { access: string; expires: number } | null {
+// Berget seat token from the harness's auth storage. Read per request so a
+// mid-session refresh is picked up. Returns null when absent or expired.
+function readSeatAuth(authPath: string): { access: string; expires: number } | null {
   try {
-    const { readFileSync } = require("node:fs") as typeof import("node:fs")
-    const path = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/auth.json`
-    const auth = JSON.parse(readFileSync(path, "utf8"))?.berget
+    const auth = JSON.parse(readFileSync(authPath, "utf8"))?.berget
     if (auth?.type !== "oauth" || typeof auth.access !== "string" || !auth.access) return null
     return { access: auth.access, expires: Number(auth.expires) }
   } catch {
@@ -125,17 +104,21 @@ function isStale(expires: number): boolean {
   return Number.isFinite(expires) && expires > 0 && expires < Date.now()
 }
 
-function seatToken(): string | null {
-  const auth = readSeatAuth()
+export function seatToken(authPath: string): string | null {
+  const auth = readSeatAuth(authPath)
   if (!auth || isStale(auth.expires)) return null // stale: let the API key take over
   return auth.access
 }
 
-function newClient(): TypeSafeClient | null {
-  const apiKey = seatToken() ?? process.env.BERGET_API_KEY ?? process.env.TYPESAFE_API_KEY
-  if (!apiKey) return null
+function apiKey(authPath: string): string | undefined {
+  return seatToken(authPath) ?? process.env.BERGET_API_KEY ?? process.env.TYPESAFE_API_KEY
+}
+
+function newClient(authPath: string): TypeSafeClient | null {
+  const key = apiKey(authPath)
+  if (!key) return null
   return new TypeSafeClient({
-    apiKey,
+    apiKey: key,
     baseURL: gatewayRoot(
       process.env.BERGET_BASE_URL ?? process.env.TYPESAFE_BASE_URL ?? "https://api.berget.ai",
     ),
@@ -150,7 +133,7 @@ interface JudgeContext {
   guardrails: string | null
 }
 
-async function judge({ client, command, guardrails }: JudgeContext): Promise<Verdict> {
+export async function judge({ client, command, guardrails }: JudgeContext): Promise<Verdict> {
   const stateParts = [`Command the agent wants to run:\n${command}`]
   const scripts = scriptContents(command)
   if (scripts) {
@@ -161,7 +144,7 @@ async function judge({ client, command, guardrails }: JudgeContext): Promise<Ver
       `Team guardrails (rules for what the agent may and may not do):\n${guardrails}`,
     )
   }
-  const questions = {
+  const questions: Record<string, ReturnType<typeof noul>> = {
     destructive: noul(
       "Does this shell command delete, overwrite, format, or irreversibly destroy data, databases, clusters, or infrastructure? " +
         "Effects that are recoverable through version control (git rm, git rm --cached, git checkout, branch operations) are not irreversible. " +
@@ -193,13 +176,10 @@ async function judge({ client, command, guardrails }: JudgeContext): Promise<Ver
   }
 }
 
-// Audit log is opt-in (SYSTEMONE_LOG=1): nothing is written to disk by
-// default, because commands can contain sensitive material.
 // Existing files the command references, with their content — so the
 // model judges what the command DOES, not just how innocuous its
 // command line looks.
 function readableFile(token: string): string | null {
-  const { readFileSync, statSync } = require("node:fs") as typeof import("node:fs")
   const path = token.replace(/^["']|["']$/g, "")
   if (!path || path.startsWith("-") || !path.includes(".")) return null
   try {
@@ -224,15 +204,11 @@ function scriptContents(command: string): string {
   return parts.join("\n")
 }
 
-function logFile(): string {
-  return `${process.env.HOME}/.cache/opencode/systemone-gate.log`
-}
-
-function log(entry: Record<string, unknown>) {
+// Audit log is opt-in (SYSTEMONE_LOG=1): nothing is written to disk by
+// default, because commands can contain sensitive material.
+function log(path: string, entry: Record<string, unknown>) {
   if (!/^(1|true|yes)$/i.test(process.env.SYSTEMONE_LOG ?? "")) return
   try {
-    const { mkdirSync, appendFileSync } = require("node:fs")
-    const path = logFile()
     mkdirSync(path.replace(/\/[^/]+$/, ""), { recursive: true })
     appendFileSync(path, JSON.stringify(entry) + "\n")
   } catch {}
@@ -245,78 +221,38 @@ function log(entry: Record<string, unknown>) {
 // block twenty an attempt waits 1.5 h, by block twenty-five almost two
 // days: brute-forcing variants past the gate is arithmetically hopeless.
 //
-// The wait is enforced as a visible cooldown error, not a silent sleep —
-// an invisible hang looks like a crash, while the error tells the agent
+// The wait is enforced as a visible cooldown block, not a silent sleep —
+// an invisible hang looks like a crash, while the reason tells the agent
 // (and through it the human) exactly what is happening and for how long.
-// Retrying early just returns the same error with the remaining time.
+// Retrying early just returns the same reason with the remaining time.
 //
 // The counter decays with quiet time — one block of memory fades per 30
 // minutes since the last block — so early false positives do not poison a
 // whole session. Decay is wall-clock, not command-count: an agent cannot
 // launder the counter by interleaving allowed commands, and an agent that
 // keeps hammering refreshes lastBlockAt on every block, so escalation
-// continues unchanged. State lives for the opencode process; restarting
+// continues unchanged. State lives for the harness process; restarting
 // it resets everything.
 const DECAY_MS = 30 * 60_000
-let blockCount = 0
-let lastBlockAt = 0
-let cooldownUntil = 0
-let loggedInactive = false
-
-function effectiveBlocks(now: number): number {
-  if (blockCount === 0 || lastBlockAt === 0) return 0
-  return Math.max(0, blockCount - Math.floor((now - lastBlockAt) / DECAY_MS))
-}
-
 const BACKOFF_BASE_MS = 10
 
-function backoffMs(blocks: number): number {
+export function backoffMs(blocks: number): number {
   if (blocks < 1) return 0
   // exponent capped at 40 to keep the float well-behaved
   return BACKOFF_BASE_MS * 2 ** Math.min(blocks - 1, 40)
 }
 
-// --- extracted hook steps (each small, each testable) -----------------------
-
-function enforceCooldown(): void {
-  const remainingMs = cooldownUntil - Date.now()
-  if (remainingMs <= 0) return
-  const wait =
-    remainingMs >= 90_000
-      ? `${Math.round(remainingMs / 60_000)} min`
-      : remainingMs >= 1000
-        ? `${Math.ceil(remainingMs / 1000)} s`
-        : `${remainingMs} ms`
-  throw new Error(
-    `SystemOne-gate: cooling down after ${blockCount} blocked command${blockCount === 1 ? "" : "s"} — ` +
-      `next attempt in ~${wait}. The wait doubles with every block; ` +
-      `restarting opencode resets it.`,
-  )
+function formatWait(remainingMs: number): string {
+  if (remainingMs >= 90_000) return `${Math.round(remainingMs / 60_000)} min`
+  if (remainingMs >= 1000) return `${Math.ceil(remainingMs / 1000)} s`
+  return `${remainingMs} ms`
 }
 
 function endpointReason(status: number | undefined): string {
   if (status === 402) return "Berget account out of credit — top up at berget.ai"
-  if (status === 401)
-    return "authentication failed — re-login via @bergetai/opencode-auth or check BERGET_API_KEY"
+  if (status === 401) return "authentication failed — re-login to Berget or check BERGET_API_KEY"
   if (status === 429) return "rate limited — wait a moment and retry"
   return "endpoint unreachable"
-}
-
-async function judgeOrThrow(ctx: JudgeContext): Promise<Verdict | null> {
-  try {
-    return await judge(ctx)
-  } catch (err) {
-    const reason = endpointReason((err as { status?: number }).status)
-    const decision = FAIL_OPEN ? "fail-open" : "fail-closed"
-    log({ ts: new Date().toISOString(), command: ctx.command, error: String(err), decision })
-    if (FAIL_OPEN) return null // explicit opt-out: availability over strictness
-    throw new Error(
-      `SystemOne-gate: ${reason} — command blocked.\n` +
-        `  ${ctx.command.slice(0, 200)}\n` +
-        `  ${String(err).slice(0, 160)}\n` +
-        `  Retry shortly, or set SYSTEMONE_FAIL_OPEN=1 to prefer availability.`,
-    )
-  }
 }
 
 // Two tiers. A named exception in guardrails.md overrides the POLICY
@@ -356,72 +292,21 @@ function decide(verdict: Verdict, hasGuardrails: boolean): Outcome {
   return { decision, kind, worst, named }
 }
 
-function logVerdict(entry: {
-  command: string
-  verdict: Verdict
-  hasGuardrails: boolean
-  outcome: Outcome
-}): void {
-  log({
-    ts: new Date().toISOString(),
-    command: entry.command,
-    ...entry.verdict,
-    guardrails: entry.hasGuardrails,
-    namedException: entry.outcome.named,
-    decision: entry.outcome.decision,
-    blockCount,
-    cooldownMs: entry.outcome.decision === "BLOCK" ? backoffMs(blockCount) : 0,
-  })
-}
-
-function throwBlock(entry: { command: string; outcome: Outcome; hasGuardrails: boolean }): void {
-  throw new Error(
-    blockMessage(entry.outcome, entry.hasGuardrails) +
-      `\n  ${entry.command.slice(0, 200)}`,
-  )
-}
-
-function registerBlock(): void {
-  const now = Date.now()
-  blockCount = effectiveBlocks(now) + 1
-  lastBlockAt = now
-  cooldownUntil = now + backoffMs(blockCount)
-}
-
-// Credentials resolve lazily: the seat token can appear or be refreshed
-// mid-session by @bergetai/opencode-auth.
-function resolveClient(): TypeSafeClient | null {
-  const client = newClient()
-  if (client) return client
-  if (!loggedInactive) {
-    log({
-      ts: new Date().toISOString(),
-      note: "gate inactive: no seat token, BERGET_API_KEY or TYPESAFE_API_KEY",
-    })
-    loggedInactive = true
-  }
-  return null
-}
-
-function readCommand(output: { args?: { command?: string } }): string {
-  return String(output.args?.command ?? "").trim()
-}
-
-function blockMessage(outcome: Outcome, hasGuardrails: boolean): string {
+function blockMessage(outcome: Outcome, hasGuardrails: boolean, harness: string): string {
   const perKind =
     outcome.kind === "guardrails_violation"
       ? `\n  If this is a false positive, your human can name the command in the` +
-        `\n  MAY section of guardrails.md and restart opencode — the gate` +
+        `\n  MAY section of guardrails.md and restart ${harness} — the gate` +
         `\n  follows the file.`
       : `\n  Judged destructive/leaking on its own merits — named exceptions in` +
         `\n  guardrails.md do not override this. If it is intended, your human` +
-        `\n  can run it directly, or restart opencode with SYSTEMONE_GATE=off` +
+        `\n  can run it directly, or restart ${harness} with SYSTEMONE_GATE=off` +
         `\n  for a session that needs it.`
   const bootstrap = hasGuardrails
     ? ""
     : `\n  No guardrails.md found in this repo. Your human can create one` +
       `\n  and write what the agent may and may not do — name what should` +
-      `\n  pass in the MAY section, then restart opencode.`
+      `\n  pass in the MAY section, then restart ${harness}.`
   return (
     `SystemOne-gate: blocked command — ${outcome.kind}=${outcome.worst.toFixed(2)} > ${THRESHOLD}\n` +
     perKind +
@@ -429,52 +314,106 @@ function blockMessage(outcome: Outcome, hasGuardrails: boolean): string {
   )
 }
 
-export const SystemOneGate = (async ({ directory }) => {
-  // Freeze guardrails NOW, at plugin load — before any command is judged.
-  // A lazy first-read would let an agent weaken guardrails.md via the
-  // ungated edit tools before issuing its first bash command and rule the
-  // whole session under its own rules.
-  readGuardrails(directory)
+export function createGate(harness: Harness, directory: string) {
+  // Freeze guardrails NOW, before any command is judged. A lazy first-read
+  // would let an agent weaken guardrails.md via the ungated edit tools
+  // before issuing its first bash command and rule the whole session under
+  // its own rules.
+  const guardrails = readGuardrails(directory, harness.guardrailPaths)
+  const hasGuardrails = !!guardrails
+  let blockCount = 0
+  let lastBlockAt = 0
+  let cooldownUntil = 0
+  let loggedInactive = false
 
-  return {
-    "tool.execute.before": async (input, output) => {
-      if (input.tool !== "bash") return
-      if (process.env.SYSTEMONE_GATE === "off") return
-      const client = resolveClient()
-      if (!client) return
-      const command = readCommand(output)
-      if (!command) return
-      enforceCooldown()
-
-      // Every command is judged — no fast path of any kind. Prefix
-      // allowlists ("it starts with ls, let it through") are exactly the
-      // kind of seam an agent learns to exploit, and an override file the
-      // agent can write is self-approval. Overrides belong to the human,
-      // outside the agent's reach: SYSTEMONE_GATE / SYSTEMONE_THRESHOLD /
-      // guardrails.md, all set before or around the session.
-
-      const guardrails = readGuardrails(directory)
-      const verdict = await judgeOrThrow({ client, command, guardrails })
-      if (!verdict) return // fail-open already logged exactly once
-
-      const outcome = decide(verdict, !!guardrails)
-      if (outcome.decision === "BLOCK") registerBlock()
-      logVerdict({ command, verdict, hasGuardrails: !!guardrails, outcome })
-
-      if (outcome.decision === "BLOCK") throwBlock({ command, outcome, hasGuardrails: !!guardrails })
-    },
+  function effectiveBlocks(now: number): number {
+    if (blockCount === 0 || lastBlockAt === 0) return 0
+    return Math.max(0, blockCount - Math.floor((now - lastBlockAt) / DECAY_MS))
   }
-}) satisfies Plugin
 
-/** Test hooks — not part of the public plugin API. */
-export const __internals = {
-  gatewayRoot,
-  backoffMs,
-  seatToken,
-  readGuardrails,
-  resetGuardrailsCache,
-  judge,
-  logFile,
+  function registerBlock(): void {
+    const now = Date.now()
+    blockCount = effectiveBlocks(now) + 1
+    lastBlockAt = now
+    cooldownUntil = now + backoffMs(blockCount)
+  }
+
+  function cooldownBlock(): Block | null {
+    const remainingMs = cooldownUntil - Date.now()
+    if (remainingMs <= 0) return null
+    return {
+      reason:
+        `SystemOne-gate: cooling down after ${blockCount} blocked command${blockCount === 1 ? "" : "s"} — ` +
+        `next attempt in ~${formatWait(remainingMs)}. The wait doubles with every block; ` +
+        `restarting ${harness.name} resets it.`,
+    }
+  }
+
+  // Credentials resolve lazily: the seat token can appear or be refreshed
+  // mid-session.
+  function resolveClient(): TypeSafeClient | null {
+    const client = newClient(harness.authPath)
+    if (client) return client
+    if (!loggedInactive) {
+      log(harness.logPath, {
+        ts: new Date().toISOString(),
+        note: "gate inactive: no seat token, BERGET_API_KEY or TYPESAFE_API_KEY",
+      })
+      loggedInactive = true
+    }
+    return null
+  }
+
+  async function check(command: string): Promise<Block | null> {
+    if (process.env.SYSTEMONE_GATE === "off") return null
+    const client = resolveClient()
+    if (!client) return null
+    if (!command) return null
+    const cooling = cooldownBlock()
+    if (cooling) return cooling
+
+    // Every command is judged — no fast path of any kind. Prefix
+    // allowlists ("it starts with ls, let it through") are exactly the
+    // kind of seam an agent learns to exploit, and an override file the
+    // agent can write is self-approval. Overrides belong to the human,
+    // outside the agent's reach: SYSTEMONE_GATE / SYSTEMONE_THRESHOLD /
+    // guardrails.md, all set before or around the session.
+
+    let verdict: Verdict
+    try {
+      verdict = await judge({ client, command, guardrails })
+    } catch (err) {
+      const decision = FAIL_OPEN ? "fail-open" : "fail-closed"
+      log(harness.logPath, { ts: new Date().toISOString(), command, error: String(err), decision })
+      if (FAIL_OPEN) return null // explicit opt-out: availability over strictness
+      return {
+        reason:
+          `SystemOne-gate: ${endpointReason((err as { status?: number }).status)} — command blocked.\n` +
+          `  ${command.slice(0, 200)}\n` +
+          `  ${String(err).slice(0, 160)}\n` +
+          `  Retry shortly, or set SYSTEMONE_FAIL_OPEN=1 to prefer availability.`,
+      }
+    }
+
+    const outcome = decide(verdict, hasGuardrails)
+    if (outcome.decision === "BLOCK") registerBlock()
+    log(harness.logPath, {
+      ts: new Date().toISOString(),
+      command,
+      ...verdict,
+      guardrails: hasGuardrails,
+      namedException: outcome.named,
+      decision: outcome.decision,
+      blockCount,
+      cooldownMs: outcome.decision === "BLOCK" ? backoffMs(blockCount) : 0,
+    })
+    if (outcome.decision === "allow") return null
+    return { reason: blockMessage(outcome, hasGuardrails, harness.name) + `\n  ${command.slice(0, 200)}` }
+  }
+
+  function hasCredential(): boolean {
+    return !!apiKey(harness.authPath)
+  }
+
+  return { check, hasCredential }
 }
-
-export default SystemOneGate

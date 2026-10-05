@@ -36,10 +36,10 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      # The plugin ships as raw TypeScript (opencode transpiles it on load);
+      # The plugin ships as raw TypeScript (opencode and pi transpile it on load);
       # a parse check is the whole "build".
       - name: Parse check
-        run: npx --yes esbuild index.ts --outfile=/dev/null
+        run: npx --yes esbuild adapters/opencode.ts adapters/pi.ts --bundle --platform=node --external:@typesafe-ai/sdk --outdir=/tmp/parse-check
 
       # Version bumps happen via a normal PR (main is protected). This
       # workflow publishes whatever package.json currently says.

@@ -2,7 +2,8 @@
 
 Stops your coding agent from running the bash command you'd regret.
 
-Every bash command [opencode](https://opencode.ai) is about to execute is
+Every bash command your coding agent ([opencode](https://opencode.ai) or
+[pi](https://pi.dev)) is about to execute is
 scored by a small decision model first, in about 100 ms. If the command
 destroys data, leaks a secret, or breaks a rule in your repo's
 `guardrails.md`, the call is blocked and the agent is told why, so it can
@@ -38,7 +39,8 @@ conversation that led to it.
 
 Two steps. First teach the gate your rules, then put it in the harness.
 
-**1. Add `guardrails.md` to your repo** (root, or `.opencode/guardrails.md`).
+**1. Add `guardrails.md` to your repo** (root, `.opencode/guardrails.md` or
+`.pi/guardrails.md`).
 Write it yourself — the value is in deciding what your team actually allows,
 not in shipping a generic file. The example below is a starting point for the
 shape:
@@ -63,13 +65,14 @@ shape:
 - Read documentation from the approved sources in docs/approved-domains.md.
 ```
 
-The gate reads the file once at session start, so restart opencode after
+The gate reads the file once at session start, so restart the harness after
 editing. Only the first 2000 characters are sent to the model, so keep the
 file short and put the important rules first.
 See [`guardrails.example.md`](guardrails.example.md).
 
-**2. Install the gate in your harness.** For opencode, add the plugin to
-`opencode.json` (global or per project):
+**2. Install the gate in your harness.**
+
+For opencode, add the plugin to `opencode.json` (global or per project):
 
 ```json
 {
@@ -77,7 +80,15 @@ See [`guardrails.example.md`](guardrails.example.md).
 }
 ```
 
-Set a key and restart opencode (plugins load at startup):
+For pi, install from a clone of this repo (an npm release for pi is coming):
+
+```sh
+git clone https://github.com/berget-ai/guardrails-md
+cd guardrails-md && npm install
+pi install ./
+```
+
+Set a key and restart the harness (plugins and extensions load at startup):
 
 ```sh
 export BERGET_API_KEY=…
@@ -85,8 +96,8 @@ export BERGET_API_KEY=…
 
 Keys come from [berget.ai](https://berget.ai). The free tier includes €5 of
 credit, and a gate call is small enough that it lasts a long time. If you
-already use Berget Code and are logged in through `@bergetai/opencode-auth`,
-skip the key: the gate picks up your seat token. If you run your own
+are logged in to Berget in your harness (`@bergetai/opencode-auth` in opencode,
+`/login` in pi), skip the key: the gate picks up your seat token. If you run your own
 System One-compatible endpoint, point `BERGET_BASE_URL` at it instead.
 
 From now on, every bash command your agent runs has to pass your guardrails
@@ -167,7 +178,7 @@ session start, but an agent with edit access could still weaken its rules
 for the *next* session. Treat `guardrails.md` changes as code review, and
 unattended agents should treat the file as untrusted input. Your overrides:
 
-- **Once:** restart opencode with `SYSTEMONE_GATE=off` and redo the step.
+- **Once:** restart the harness with `SYSTEMONE_GATE=off` and redo the step.
 - **Tune:** raise `SYSTEMONE_THRESHOLD` if the gate is too jumpy for your
   taste.
 - **Fix the policy:** if the block is a false positive against your rules,
@@ -229,7 +240,7 @@ credentials, sandboxes and human review still matter.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| (seat token) | auto | Berget Code seat auth via `@bergetai/opencode-auth` |
+| (seat token) | auto | Berget seat auth from the harness's login (see [Harness differences](#harness-differences)) |
 | `BERGET_API_KEY` | – | Bearer token for CI/headless (fallback: `TYPESAFE_API_KEY`) |
 | `BERGET_BASE_URL` | `https://api.berget.ai` | Gateway root or full `/v1/systemone` URL (fallback: `TYPESAFE_BASE_URL`) |
 | `BERGET_MODEL` | `berget/bev` | Model id as exposed by the gateway (fallback: `TYPESAFE_DEFAULT_MODEL`) |
@@ -266,7 +277,7 @@ The wait doubles with every block; restarting opencode resets it.
 ```
 
 Retrying early returns the same message with the remaining time and does
-not extend the cooldown. Restarting opencode resets the counter; the
+not extend the cooldown. Restarting the harness resets the counter; the
 audit log records the block count and cooldown with every verdict.
 
 ## Details
@@ -283,17 +294,39 @@ milliseconds and no extra round-trip. The questions use the `noul` type from
 the System One contract; any endpoint that implements the contract works.
 
 Nothing is written to disk unless you turn on the audit log. With
-`SYSTEMONE_LOG=1`, every verdict is appended as JSONL to
-`~/.cache/opencode/systemone-gate.log` with the full command and all scores.
+`SYSTEMONE_LOG=1`, every verdict is appended as JSONL to the harness's log
+file (see [Harness differences](#harness-differences)) with the full command and all scores.
 Verdicts you disagree with can be reviewed there and fed back as training
 data for the next fine-tune. The log holds whatever your commands hold, so
 treat it as sensitive.
 
-Manual install: copy [`index.ts`](index.ts) into
-`~/.config/opencode/plugins/` (global) or `.opencode/plugins/` (per project)
-and register `"plugin": ["./plugins/index.ts"]`. Manual installs need
-`@typesafe-ai/sdk` resolvable (`npm install -g @typesafe-ai/sdk`); the npm
-package brings it as a dependency.
+Manual install for opencode: copy [`core.ts`](core.ts) and
+[`adapters/opencode.ts`](adapters/opencode.ts) into
+`~/.config/opencode/plugins/guardrails-md/` (global) or
+`.opencode/plugins/guardrails-md/` (per project), keeping the `adapters/`
+folder, and register
+`"plugin": ["./plugins/guardrails-md/adapters/opencode.ts"]`. Manual installs
+need `@typesafe-ai/sdk` resolvable (`npm install -g @typesafe-ai/sdk`); the
+npm package brings it as a dependency.
+
+## Harness differences
+
+The judging is the same in every harness: same questions, threshold,
+cooldown and fail-closed default. What differs is where the gate looks.
+
+| | opencode | pi |
+|---|---|---|
+| Hook | `tool.execute.before`, bash only | `tool_call`, bash only, including calls a codemode script makes |
+| On block | throws; the agent reads the message | returns `{ block, reason }` to the agent and shows a warning to you |
+| Without a credential | inactive; one log line with `SYSTEMONE_LOG=1` | inactive; warns you once per session |
+| Seat token | `$XDG_DATA_HOME/opencode/auth.json` (default `~/.local/share`) | `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent`) |
+| Policy file | `guardrails.md`, then `.opencode/guardrails.md` | `guardrails.md`, then `.pi/guardrails.md` |
+| Policy read from | the project directory opencode passes the plugin | the directory pi was started in |
+| Audit log | `~/.cache/opencode/systemone-gate.log` | `~/.cache/pi/systemone-gate.log` |
+
+In pi, `/reload` counts as a restart: it re-reads `guardrails.md` and resets
+the cooldown. pi's `powershell` tool is not gated; if a repo enables it in
+`.pi/settings.json`, commands run through it skip the gate.
 
 ## License
 

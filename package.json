@@ -1,19 +1,27 @@
 {
   "name": "@bergetai/opencode-guardrails-md",
   "version": "0.5.0",
-  "description": "guardrails.md plugin \u2014 opencode: a System One decision model (TypeSafe Jev) judges every bash command before it runs \u2014 destructive / credentials / guardrails.md policy",
+  "description": "guardrails.md gate for opencode and pi: a System One decision model (TypeSafe Jev) judges every bash command before it runs — destructive / credentials / guardrails.md policy",
   "type": "module",
   "exports": {
-    ".": "./index.ts"
+    ".": "./adapters/opencode.ts"
   },
   "files": [
-    "index.ts",
+    "core.ts",
+    "adapters/opencode.ts",
+    "adapters/pi.ts",
     "README.md",
     "guardrails.example.md"
   ],
+  "pi": {
+    "extensions": [
+      "./adapters/pi.ts"
+    ]
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",
+    "pi",
     "systemone",
     "safety",
     "guardrails",
@@ -34,6 +42,14 @@
   "homepage": "https://github.com/berget-ai/guardrails-md#readme",
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "vitest": "^5.0.3"
