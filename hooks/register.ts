@@ -5,10 +5,12 @@
  * the SDK). The questions, decision, block wording and cooldown below are
  * the same as core.ts's; keep the two in step when editing either.
  *
- * session.start snapshots guardrails.md (then .claude/guardrails.md) and
- * every variable below; it fires once per session and not on compaction,
- * and a missing snapshot denies. tool.call judges Bash, and Monitor when it
- * runs a shell `command`, and answers { deny } on a block.
+ * session.start snapshots guardrails.md (then .claude/guardrails.md), the
+ * session root and every variable below; it fires once per session and not
+ * on compaction, and a missing snapshot denies. tool.call judges Bash, and
+ * Monitor when it runs a shell `command`, and deterministically refuses
+ * Edit, Write and NotebookEdit on protected paths — no model call, no
+ * threshold, no cooldown — answering { deny } on a block.
  *
  * Fail-closed: the engine skips a hook that throws or overruns and lets the
  * call through, so .catch denies instead. The endpoint call is raced
@@ -23,6 +25,22 @@ import type { Register } from "claude-code"
 
 const HARNESS = "claude"
 const GUARDRAIL_PATHS = ["guardrails.md", ".claude/guardrails.md"]
+// The same list as core.ts's PROTECTED_PATHS — a hooks module cannot import
+// it, so keep the two in step.
+const PROTECTED_PATHS = [
+  "guardrails.md",
+  ".agents/guardrails.md",
+  ".opencode/guardrails.md",
+  ".pi/guardrails.md",
+  ".claude/guardrails.md",
+  "opencode.json",
+  "opencode.jsonc",
+  ".opencode/",
+  ".pi/",
+  ".claude/settings.json",
+  ".claude/settings.local.json",
+  ".github/workflows/",
+]
 const TIMEOUT_MS = 5000
 const DEFAULT_THRESHOLD = 0.7
 const GUARDRAILS_MAX = 2000 // chars — keep the state text tight
@@ -300,6 +318,107 @@ function createCooldown() {
   return { register, reason }
 }
 
+// --- protected paths --------------------------------------------------------
+// A deterministic deny sits in front of the model: a write to a protected
+// path is a rule, not a verdict — the cooldown counter stays untouched, an
+// agent that retries pays nothing. The list is relative to the session root;
+// an entry ending in `/` protects everything below it. The path logic below
+// mirrors core.ts's foldPath/relUnder/placePath — keep the two in step.
+
+// A path as its spelling says: `.` and `..` folded, doubles collapsed, no
+// symlink followed.
+function foldPath(p: string): string {
+  const absolute = p.startsWith("/")
+  const out: string[] = []
+  for (const part of p.split(/[\\/]/)) {
+    if (!part || part === ".") continue
+    if (part === "..") {
+      if (out.length > 0) out.pop()
+    } else {
+      out.push(part)
+    }
+  }
+  return absolute ? `/${out.join("/")}` : out.join("/")
+}
+
+function relUnder(root: string, path: string): string | null {
+  const r = foldPath(root)
+  const p = foldPath(path)
+  if (r === "" || p === r) return null
+  if (r === "/") return p.slice(1)
+  return p.startsWith(`${r}/`) ? p.slice(r.length + 1) : null
+}
+
+// The matching entry, or null. Called twice (placed path, then literal
+// spelling), like core.ts matches both spellings.
+function protectedPath(root: string, resolved: string, list: readonly string[]): string | null {
+  if (!root || !resolved) return null
+  const rel = relUnder(root, resolved)
+  if (rel === null) return null
+  for (const entry of list) {
+    if (entry.endsWith("/")) {
+      if (rel.startsWith(entry)) return entry
+    } else if (rel === entry) {
+      return entry
+    }
+  }
+  return null
+}
+
+function protectedMessage(entry: string): string {
+  return (
+    `SystemOne-gate: protected file — ${entry}\n` +
+    `  Policy and harness configuration are edited by your human, not the agent.\n` +
+    `  Ask them to make the change and restart ${HARNESS}.`
+  )
+}
+
+function protectList(raw: string | undefined): string[] {
+  return [...PROTECTED_PATHS, ...(raw ?? "").split(",").map((entry) => entry.trim()).filter((entry) => entry !== "")]
+}
+
+// Where the path lands, every symlink followed — including for a file that
+// does not exist yet: the nearest existing ancestor is resolved and the tail
+// appended, as core.ts's walk does. null when nothing resolves (an odd
+// spelling, a dangling link), and the guard then denies: the engine denies
+// without a realPath too.
+function placeable(path: string): boolean {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"))
+  const name = path.slice(cut + 1)
+  return (
+    !/^[A-Za-z]:(?![\\/])/.test(path) &&
+    !/^[\\/][\\/]/.test(path) &&
+    !/^[A-Za-z]:/.test(name) &&
+    name !== "" &&
+    name !== "." &&
+    name !== ".."
+  )
+}
+
+async function place(
+  $: { fs: { stat(path: string, options: { resolve: boolean }): Promise<{ realPath?: string } | undefined> } },
+  path: string,
+): Promise<string | null> {
+  if (!placeable(path)) return null
+  const tail: string[] = []
+  let target = path
+  for (;;) {
+    const own = await $.fs.stat(target, { resolve: true }).catch(() => undefined)
+    if (own) {
+      if (own.realPath === undefined) return null
+      let real = own.realPath.replace(/[\\/]+$/, "")
+      for (const name of tail) real = `${real}/${name}`
+      return real
+    }
+    const stripped = target.replace(/[\\/]+$/, "")
+    const cut = Math.max(stripped.lastIndexOf("/"), stripped.lastIndexOf("\\"))
+    const name = stripped.slice(cut + 1)
+    if (cut < 0 || name === "" || name === "." || name === ".." || /^[A-Za-z]:/.test(name)) return null
+    tail.unshift(name)
+    target = stripped.slice(0, cut + 1)
+  }
+}
+
 // --- the module -------------------------------------------------------------
 
 interface Session {
@@ -310,6 +429,9 @@ interface Session {
   threshold: number
   failOpen: boolean
   off: boolean
+  cwd: string
+  root: string
+  protect: string[]
   warnings: string[]
   cooldown: ReturnType<typeof createCooldown>
 }
@@ -338,8 +460,12 @@ export const register: Register = (on) => {
   on("session.start", async ($, e, next) => {
     const raw = await firstReadable((path) => $.fs.read(path), GUARDRAIL_PATHS.map((p) => `${e.cwd}/${p}`))
     const guardrails = raw === null ? null : truncateGuardrails(raw)
+    const rootStat = await $.fs.stat(e.cwd, { resolve: true }).catch(() => undefined)
     const threshold = parseThreshold(await $.env.get("SYSTEMONE_THRESHOLD"))
     session = {
+      cwd: e.cwd,
+      root: rootStat?.realPath && rootStat.realPath !== "" ? rootStat.realPath : e.cwd,
+      protect: protectList(await $.env.get("SYSTEMONE_PROTECT")),
       guardrails,
       key: (await $.env.get("BERGET_API_KEY")) ?? (await $.env.get("TYPESAFE_API_KEY")),
       baseURL: gatewayRoot((await $.env.get("BERGET_BASE_URL")) ?? (await $.env.get("TYPESAFE_BASE_URL")) ?? "https://api.berget.ai"),
@@ -414,5 +540,26 @@ export const register: Register = (on) => {
     return deny(blockMessage(outcome, !!s.guardrails, s.threshold) + `\n  ${command.slice(0, 200)}`)
   }).catch(($, e, next) => ({
     deny: `SystemOne-gate: the gate failed (${next.error.kind}${next.error.message ? `: ${next.error.message}` : ""}) — command blocked (fail-closed).`,
+  }))
+
+  on("tool.call", { tool: ["Edit", "Write", "NotebookEdit"] }, async ($, e, next) => {
+    if (!session) return { deny: "SystemOne-gate: no frozen policy — session.start did not run. Restart Claude Code (fail-closed)." }
+    const s = session
+    if (s.off) return next(e)
+    const target = e.tool === "NotebookEdit" ? e.notebook_path : e.file_path
+    if (typeof target !== "string" || target === "") return next(e)
+    const placed = await place($, target)
+    if (placed === null) {
+      return {
+        deny:
+          `SystemOne-gate: cannot resolve ${JSON.stringify(target)} — edit blocked (fail-closed).\n` +
+          `  The path could not be checked against the protected list.`,
+      }
+    }
+    const hit = protectedPath(s.root, placed, s.protect) ?? protectedPath(s.cwd, target, s.protect)
+    if (hit === null) return next(e)
+    return { deny: [protectedMessage(hit), ...s.warnings.map((w) => `  ${w}`)].join("\n") }
+  }).catch(($, e, next) => ({
+    deny: `SystemOne-gate: the gate failed (${next.error.kind}${next.error.message ? `: ${next.error.message}` : ""}) — edit blocked (fail-closed).`,
   }))
 }

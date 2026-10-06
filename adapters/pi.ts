@@ -1,9 +1,11 @@
 /**
  * guardrails-md for pi — gates every bash tool call through core.ts before it
- * runs, including calls a codemode script makes. A block returns
- * { block, reason } to the agent and warns the human. Without a credential
- * the gate is inactive, and the human is told once. Config warnings (bad
- * threshold, truncated guardrails.md) are shown when a session starts.
+ * runs, including calls a codemode script makes, and deterministically refuses
+ * edits and writes to protected paths (edit/write): no model call, no
+ * threshold, no cooldown. A block returns { block, reason } to the agent and
+ * warns the human. Without a credential the gate is inactive, and the human
+ * is told once. Config warnings (bad threshold, truncated guardrails.md) are
+ * shown when a session starts.
  *
  * Credentials: pi's own resolution for the "berget" provider first (OAuth or
  * API-key login), then the berget OAuth entry in pi's auth.json
@@ -43,6 +45,12 @@ export default function guardrailsMd(api: ExtensionAPI) {
   })
 
   api.on("tool_call", async (event, ctx) => {
+    if (event.toolName === "edit" || event.toolName === "write") {
+      const pathBlock = gate.checkPath(String(event.input.path ?? ""))
+      if (!pathBlock) return
+      warn(ctx, pathBlock.reason.split("\n")[0])
+      return { block: true, reason: pathBlock.reason }
+    }
     if (event.toolName !== "bash") return
     const key = await ctx.modelRegistry.getApiKeyForProvider(BERGET_PROVIDER)
     const block = await gate.check(String(event.input.command ?? "").trim(), key)
