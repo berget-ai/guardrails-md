@@ -59,6 +59,9 @@ jobs:
 
       # Version bumps happen via a normal PR (main is protected). This
       # workflow publishes whatever package.json currently says.
+      - name: Build cli.js (self-contained bundle for npx)
+        run: npx --yes esbuild cli.ts --bundle --platform=node --format=cjs --outfile=cli.js
+
       - name: Publish to NPM (OIDC trusted publishing)
         run: |
           npm install -g npm@latest   # OIDC trusted publishing needs npm >= 11.5.1

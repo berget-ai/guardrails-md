@@ -15,6 +15,7 @@ function opencode(): Harness {
   const home = process.env.HOME
   return {
     name: "opencode",
+      label: "opencode",
     authPath: `${process.env.XDG_DATA_HOME ?? `${home}/.local/share`}/opencode/auth.json`,
     guardrailPaths: ["guardrails.md", ".opencode/guardrails.md"],
     logPath: `${home}/.cache/opencode/systemone-gate.log`,

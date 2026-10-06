@@ -76,7 +76,6 @@ async function main(): Promise<number> {
     {
       name: "git",
       label: "git",
-      label: "git",
       authPath: `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/auth.json`,
       guardrailPaths: ["guardrails.md", ".opencode/guardrails.md", ".pi/guardrails.md"],
       logPath: `${process.env.HOME}/.cache/guardrails-md/pre-commit.log`,
@@ -104,8 +103,7 @@ main().then(
     // Fail-closed: an unreachable endpoint blocks the commit.
     if (FAIL_OPEN) process.exit(0)
     process.stderr.write(
-      `guardrails-md: endpoint unreachable — commit blocked.\n` +
-        `  ${String(err).slice(0, 200)}\n` +
+      `guardrails-md: commit blocked — ${String(err).slice(0, 200)}\n` +
         `  Retry shortly, or set SYSTEMONE_FAIL_OPEN=1 to prefer availability.\n`,
     )
     process.exit(1)

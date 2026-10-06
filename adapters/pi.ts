@@ -20,6 +20,7 @@ function pi(): Harness {
   const home = process.env.HOME
   return {
     name: "pi",
+      label: "pi",
     authPath: `${process.env.PI_CODING_AGENT_DIR ?? `${home}/.pi/agent`}/auth.json`,
     guardrailPaths: ["guardrails.md", ".pi/guardrails.md"],
     logPath: `${home}/.cache/pi/systemone-gate.log`,
