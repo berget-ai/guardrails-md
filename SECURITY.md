@@ -11,7 +11,7 @@ We aim to acknowledge reports within two business days.
 ## Scope
 
 - The gate code in this repository (core.ts and the opencode and pi adapters
-  in adapters/).
+  in adapters/, and the Claude Code hooks module in hooks/register.ts).
 - The published npm package `@bergetai/opencode-guardrails-md`.
 
 ## Known limitations (by design, documented in the README)
@@ -20,7 +20,11 @@ These are documented design decisions, not vulnerabilities — but if you
 find a way to break the stated guarantees, we want to hear about it:
 
 - The gate judges bash commands only; file edits pass through. In pi, the
-  `powershell` tool is not gated.
+  `powershell` tool is not gated; in Claude Code, `Bash` and `Monitor`'s
+  shell `command` are gated and `PowerShell` is not.
+- Claude Code hooks modules are an early-access API. The module fails
+  closed through its `.catch` handler; an engine change that bypassed
+  module hooks entirely would leave Bash ungated.
 - `guardrails.md` is read once at session start but lives in the repo —
   an agent with edit access can weaken the rules for the next session,
   including by padding the file so rules fall past the 2000-character
@@ -35,4 +39,6 @@ find a way to break the stated guarantees, we want to hear about it:
 Commands are sent to the configured System One endpoint for scoring.
 Berget AI operates a zero data retention policy under EU data protection
 law. Audit logging is opt-in (`SYSTEMONE_LOG=1`) and writes to your local
-machine only.
+machine only; the Claude Code module has no audit log. In Claude Code the
+request goes through Claude Code's own HTTP client, under your
+organization's web-fetch policy.

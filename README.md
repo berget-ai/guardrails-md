@@ -2,8 +2,8 @@
 
 Stops your coding agent from running the bash command you'd regret.
 
-Every bash command your coding agent ([opencode](https://opencode.ai) or
-[pi](https://pi.dev)) is about to execute is
+Every bash command your coding agent ([opencode](https://opencode.ai),
+[pi](https://pi.dev) or [Claude Code](https://code.claude.com)) is about to execute is
 scored by a small decision model first, in about 100 ms. If the command
 destroys data, leaks a secret, or breaks a rule in your repo's
 `guardrails.md`, the call is blocked and the agent is told why, so it can
@@ -39,8 +39,8 @@ conversation that led to it.
 
 Two steps. First teach the gate your rules, then put it in the harness.
 
-**1. Add `guardrails.md` to your repo** (root, `.opencode/guardrails.md` or
-`.pi/guardrails.md`).
+**1. Add `guardrails.md` to your repo** (root, `.opencode/guardrails.md`,
+`.pi/guardrails.md` or `.claude/guardrails.md`).
 Write it yourself — the value is in deciding what your team actually allows,
 not in shipping a generic file. The example below is a starting point for the
 shape:
@@ -89,6 +89,23 @@ git clone https://github.com/berget-ai/guardrails-md
 cd guardrails-md && npm install
 pi install ./
 ```
+
+For Claude Code, install from this repo's marketplace, at the prompt of a
+running session:
+
+```
+/plugin install guardrails-md --marketplace berget-ai/guardrails-md
+```
+
+Answer `y` to add the marketplace, then pick a scope; the user scope loads
+it in every session from then on. It is a hooks module that Claude Code
+loads in-process from `hooks/hooks.json`, so there is no build step and no
+`npm install`. To run it from a clone for one session instead, use
+`claude --plugin-dir ./guardrails-md`.
+
+Hooks modules are an early-access Claude Code API (checked on 2.1.291);
+the engine may change them between releases. Claude Code has no Berget seat
+token — set `BERGET_API_KEY` (below) for this harness.
 
 Set a key and restart the harness (plugins and extensions load at startup):
 
@@ -339,21 +356,54 @@ npm package brings it as a dependency.
 ## Harness differences
 
 The judging is the same in every harness: same questions, threshold,
-cooldown and fail-closed default. What differs is where the gate looks.
+cooldown and fail-closed default. opencode and pi share [`core.ts`](core.ts);
+the Claude Code module carries its own copy of the questions, decision,
+block wording and cooldown, because a hooks module runs without Node and
+imports only files of the plugin. Keep the two in step when editing
+either. What differs is where the gate looks.
 
-| | opencode | pi |
-|---|---|---|
-| Hook | `tool.execute.before`, bash only | `tool_call`, bash only, including calls a codemode script makes |
-| On block | throws; the agent reads the message | returns `{ block, reason }` to the agent and shows a warning to you (on stderr in `pi -p`) |
-| Without a credential | inactive; one log line with `SYSTEMONE_LOG=1` | inactive; warns you once per session (on stderr in `pi -p`) |
-| Seat token | `$XDG_DATA_HOME/opencode/auth.json` (default `~/.local/share`) | pi's Berget login, OAuth or API key, resolved by pi itself; then the OAuth entry in `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent`) |
-| Policy file | `guardrails.md`, then `.opencode/guardrails.md` | `guardrails.md`, then `.pi/guardrails.md` |
-| Policy read from | the project directory opencode passes the plugin | the directory pi was started in |
-| Audit log | `~/.cache/opencode/systemone-gate.log` | `~/.cache/pi/systemone-gate.log` |
+| | opencode | pi | Claude Code |
+|---|---|---|---|
+| Hook | `tool.execute.before`, bash only | `tool_call`, bash only, including calls a codemode script makes | hooks module: `tool.call` on `Bash` and on `Monitor` when it runs a `command`; `session.start` freezes the policy and the environment |
+| On block | throws; the agent reads the message | returns `{ block, reason }` to the agent and shows a warning to you (on stderr in `pi -p`) | answers `{ deny }`; Claude reads the reason |
+| Without a credential | inactive; one log line with `SYSTEMONE_LOG=1` | inactive; warns you once per session (on stderr in `pi -p`) | inactive; a toast warns you at session start |
+| Seat token | `$XDG_DATA_HOME/opencode/auth.json` (default `~/.local/share`) | pi's Berget login, OAuth or API key, resolved by pi itself; then the OAuth entry in `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent`) | none — `BERGET_API_KEY` (or `TYPESAFE_API_KEY`) only |
+| Policy file | `guardrails.md`, then `.opencode/guardrails.md` | `guardrails.md`, then `.pi/guardrails.md` | `guardrails.md`, then `.claude/guardrails.md` |
+| Policy read from | the project directory opencode passes the plugin | the directory pi was started in | the session's directory, frozen at `session.start` |
+| Audit log | `~/.cache/opencode/systemone-gate.log` | `~/.cache/pi/systemone-gate.log` | not supported (`$.fs` cannot append) |
 
 In pi, `/reload` counts as a restart: it re-reads `guardrails.md` and resets
 the cooldown. pi's `powershell` tool is not gated; if a repo enables it in
 `.pi/settings.json`, commands run through it skip the gate.
+
+In Claude Code, the module lives as long as the session, so the frozen
+policy, the environment and the cooldown stay in memory, as in opencode
+and pi. `session.start` fires once per session and not on `/compact`, so
+compaction neither re-reads `guardrails.md` nor resets the cooldown;
+`/clear` keeps both too. Starting a new session, or a hot reload while
+developing the plugin, re-reads `guardrails.md` and resets the cooldown.
+
+Claude Code skips a hook that throws or overruns and lets the call
+through, so the module attaches a `.catch` handler that denies instead:
+the gate fails closed. If `session.start` never ran, every command is
+denied. The endpoint call goes through Claude Code's own `$.http.fetch`:
+when your organization's web-fetch policy refuses `api.berget.ai` (or
+your `BERGET_BASE_URL`), the call fails and the command is denied like
+any unreachable endpoint (or allowed with `SYSTEMONE_FAIL_OPEN=1`).
+The call times out after 5 s, as the SDK's does in opencode and pi, and a
+timeout is treated like an unreachable endpoint. Unlike the SDK, the module
+makes one attempt with no retry on 429 or 5xx. The `SYSTEMONE_*` and
+`BERGET_*` variables are read once, at `session.start`; changing them takes
+a new session.
+
+`Bash` is gated, and so is `Monitor` when it runs a shell `command` (a
+Monitor watching a WebSocket runs nothing and passes). `PowerShell` is not
+gated, mirroring pi's decision: on Windows without Git Bash, where Claude
+Code registers only PowerShell, the gate never fires.
+
+To test the module, run `npm run test:claude`. It copies the plugin to a
+temp folder and runs `claude plugin test` there, because that command
+would otherwise pick up the vitest files.
 
 ## License
 

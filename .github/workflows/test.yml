@@ -1,0 +1,48 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test (opencode, pi, core)
+        run: npx vitest run
+
+      # The Claude Code module runs inside the engine, not under vitest.
+      # `claude plugin test` loads it as a session would. The CLI is not
+      # pinned on purpose: hooks modules are an early-access API, and an
+      # engine release that changes them should fail here, not in a
+      # user's session.
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Test (Claude Code module)
+        run: |
+          claude --version
+          claude plugin validate . --strict
+          npm run test:claude
+
+      # The plugin ships as raw TypeScript (opencode and pi transpile it on
+      # load); a parse check is the whole "build". --bundle forces esbuild to
+      # RESOLVE relative imports — a plain parse accepts an adapter even when
+      # ../core.ts is missing.
+      - name: Parse + import-resolution check
+        run: npx --yes esbuild --bundle adapters/opencode.ts adapters/pi.ts hooks/register.ts --outdir=/tmp/parse-check --platform=node --format=esm --external:@typesafe-ai/sdk --external:@opencode-ai/plugin --external:@earendil-works/pi-coding-agent "--external:node:*"

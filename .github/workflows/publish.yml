@@ -15,7 +15,11 @@ on:
           - major
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,13 +40,8 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      # The plugin ships as raw TypeScript (opencode and pi transpile it on
-      # load); a parse check is the whole "build". --bundle forces esbuild to
-      # RESOLVE relative imports — a plain parse accepts an adapter even when
-      # ../core.ts is missing from the package, which is exactly the
-      # breakage the files-whitelist below must never ship.
-      - name: Parse + import-resolution check
-        run: npx --yes esbuild --bundle adapters/opencode.ts adapters/pi.ts --outdir=/tmp/parse-check --platform=node --external:@typesafe-ai/sdk --external:@opencode-ai/plugin --external:@earendil-works/pi-coding-agent "--external:node:*"
+      - name: Install dependencies
+        run: npm ci
 
       # The package ships raw .ts via a files whitelist; forgetting a module
       # there publishes a plugin that fails to load for every user. Pack,
@@ -53,8 +52,8 @@ jobs:
         run: |
           mkdir -p /tmp/pkg && npm pack --pack-destination /tmp/pkg >/dev/null
           tar -xzf /tmp/pkg/*.tgz -C /tmp/pkg
-          npx --yes esbuild --bundle /tmp/pkg/package/adapters/opencode.ts /tmp/pkg/package/adapters/pi.ts \
-            --outdir=/tmp/pkg/out --platform=node \
+          npx --yes esbuild --bundle /tmp/pkg/package/adapters/opencode.ts /tmp/pkg/package/adapters/pi.ts /tmp/pkg/package/hooks/register.ts \
+            --outdir=/tmp/pkg/out --platform=node --format=esm \
             --external:@typesafe-ai/sdk --external:@opencode-ai/plugin --external:@earendil-works/pi-coding-agent "--external:node:*"
           echo "tarball OK: every relative import resolves inside the published package"
 
