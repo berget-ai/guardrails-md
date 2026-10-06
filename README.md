@@ -109,6 +109,13 @@ token — set `BERGET_API_KEY` (below) for this harness.
 
 Set a key and restart the harness (plugins and extensions load at startup):
 
+For a git pre-commit hook (any repo, any harness), add the CLI:
+
+```sh
+npx guardrails-md pre-commit
+```
+
+
 ```sh
 export BERGET_API_KEY=…
 ```

@@ -3,3 +3,4 @@ dist/
 *.tgz
 .claude-plugin/types/
 /tsconfig.json
+cli.js

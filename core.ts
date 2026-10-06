@@ -30,7 +30,10 @@ import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
 import { noul, TypeSafeClient } from "@typesafe-ai/sdk"
 
 export interface Harness {
-  name: "opencode" | "pi"
+  /** Machine identifier for the harness ("opencode", "pi", "git", …). */
+  name: string
+  /** Human-readable name used in user-facing messages. */
+  label: string
   authPath: string
   guardrailPaths: string[]
   logPath: string
@@ -373,7 +376,7 @@ export function createGate(harness: Harness, directory: string) {
       reason:
         `SystemOne-gate: cooling down after ${blockCount} blocked command${blockCount === 1 ? "" : "s"} — ` +
         `next attempt in ~${formatWait(remainingMs)}. The wait doubles with every block; ` +
-        `restarting ${harness.name} resets it.`,
+        `restarting ${harness.label} resets it.`,
     }
   }
 
@@ -449,5 +452,57 @@ export function createGate(harness: Harness, directory: string) {
     return !!apiKey(harness.authPath, resolvedKey)
   }
 
-  return { check, hasCredential, warnings }
+  // Judge a git diff (pre-commit): different questions than the command
+  // gate, but the same pipeline — threshold, fail-closed, cooldown, log.
+  // The guardrails git-content rules are part of the state, so the model
+  // judges the diff against the team's written policy.
+  async function checkDiff(
+    diff: string,
+    questions: Record<string, { type: string; instructions: string }>,
+  ): Promise<Block | null> {
+    if (process.env.SYSTEMONE_GATE === "off") return null
+    const client = resolveClient()
+    if (!client) return null
+
+    const state =
+      "Staged changes about to be committed to the git repository:\n" + diff +
+      (guardrails ? "\n\nTeam guardrails (rules for what may be committed):\n" + guardrails : "")
+
+    let answers: Record<string, { noul?: number }> = {}
+    try {
+      const response = await client.systemOne({ state: { text: state }, questions })
+      answers = response.answers as Record<string, { noul?: number }>
+    } catch (err) {
+      const decision = FAIL_OPEN ? "fail-open" : "fail-closed"
+      log(harness.logPath, { ts: new Date().toISOString(), error: String(err), decision })
+      if (FAIL_OPEN) return null
+      return {
+        reason:
+          `guardrails-md: endpoint unreachable — commit blocked.\n` +
+          `  ${String(err).slice(0, 200)}\n` +
+          `  Retry shortly, or set SYSTEMONE_FAIL_OPEN=1 to prefer availability.`,
+      }
+    }
+
+    const scores = Object.entries(questions).map(([k]) => answers[k]?.noul ?? 0)
+    const worst = Math.max(...scores, 0)
+    log(harness.logPath, {
+      ts: new Date().toISOString(),
+      diff: diff.slice(0, 2000),
+      scores: Object.fromEntries(Object.entries(questions).map(([k]) => [k, answers[k]?.noul ?? 0])),
+      decision: worst > THRESHOLD ? "BLOCK" : "allow",
+    })
+    if (worst <= THRESHOLD) return null
+    const worstQ = Object.entries(questions).find(
+      ([k]) => (answers[k]?.noul ?? 0) === worst,
+    )?.[0] ?? "content"
+    return {
+      reason:
+        `guardrails-md: commit blocked — ${worstQ}=${worst.toFixed(2)} > ${THRESHOLD}.\n` +
+        `  Remove the sensitive content and stage again. If this is a false\n` +
+        `  positive, raise SYSTEMONE_THRESHOLD or set SYSTEMONE_FAIL_OPEN=1.`,
+    }
+  }
+
+  return { check, checkDiff, hasCredential, warnings }
 }
