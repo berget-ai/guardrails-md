@@ -90,18 +90,20 @@ cd guardrails-md && npm install
 pi install ./
 ```
 
-For Claude Code, load the plugin from a clone of this repo (a marketplace
-entry is coming with the rename release). It is a
-hooks module that Claude Code
-loads in-process from `hooks/hooks.json`, so there is no build step and no
-`npm install`:
+For Claude Code, install from this repo's marketplace, at the prompt of a
+running session:
 
-```sh
-git clone https://github.com/berget-ai/guardrails-md
-claude --plugin-dir ./guardrails-md
+```
+/plugin install guardrails-md --marketplace berget-ai/guardrails-md
 ```
 
-Hooks modules are an early-access Claude Code API (checked on 2.1.289);
+Answer `y` to add the marketplace, then pick a scope; the user scope loads
+it in every session from then on. It is a hooks module that Claude Code
+loads in-process from `hooks/hooks.json`, so there is no build step and no
+`npm install`. To run it from a clone for one session instead, use
+`claude --plugin-dir ./guardrails-md`.
+
+Hooks modules are an early-access Claude Code API (checked on 2.1.291);
 the engine may change them between releases. Claude Code has no Berget seat
 token — set `BERGET_API_KEY` (below) for this harness.
 
