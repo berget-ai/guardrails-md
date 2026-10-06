@@ -1,12 +1,15 @@
 {
-  "name": "guardrails-md",
-  "version": "0.6.0",
-  "description": "guardrails.md \u2014 a decision-model gate for coding agents. CLI (pre-commit hook) + opencode plugin. Every command and commit passes your guardrails before it is allowed.",
+  "name": "@bergetai/opencode-guardrails-md",
+  "version": "0.8.0",
+  "description": "guardrails.md gate for opencode, pi and Claude Code (hooks module) + git pre-commit CLI: a System One decision model (TypeSafe Jev) judges every bash command and staged commit before it runs \u2014 destructive / credentials / guardrails.md policy",
   "type": "module",
   "exports": {
     ".": "./adapters/opencode.ts",
     "./opencode": "./adapters/opencode.ts",
     "./pi": "./adapters/pi.ts"
+  },
+  "bin": {
+    "guardrails-md": "./cli.js"
   },
   "files": [
     "core.ts",
@@ -14,15 +17,13 @@
     "adapters/pi.ts",
     "cli.ts",
     "cli.js",
+    ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/register.ts",
     "README.md",
     "guardrails.example.md",
     "LICENSE"
   ],
-  "pi": {
-    "extensions": [
-      "./adapters/pi.ts"
-    ]
-  },
   "keywords": [
     "guardrails",
     "cli",
@@ -30,7 +31,10 @@
     "git",
     "decision-model",
     "systemone",
-    "safety"
+    "safety",
+    "opencode",
+    "pi",
+    "claude-code"
   ],
   "license": "MIT",
   "publishConfig": {
@@ -46,19 +50,5 @@
   "homepage": "https://github.com/berget-ai/guardrails-md#readme",
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
-  },
-  "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "vitest": "^5.0.3"
-  },
-  "bin": {
-    "guardrails-md": "./cli.js"
   }
 }

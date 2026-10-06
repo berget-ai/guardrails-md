@@ -1,4 +1,6 @@
 node_modules/
 dist/
 *.tgz
+.claude-plugin/types/
+/tsconfig.json
 cli.js
