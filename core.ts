@@ -164,8 +164,12 @@ export function protectedPath(root: string, candidate: string): string | null {
   if (!candidate) return null
   const rootReal = realpathSync(root)
   const absolute = isAbsolute(candidate) ? foldPath(candidate) : foldPath(join(root, candidate))
-  const hit = (rel: string | null): string | null => {
-    if (rel === null) return null
+  // Case-folded: on a case-insensitive filesystem (macOS, Windows defaults)
+  // `Guardrails.MD` opens guardrails.md. Every entry is lowercase; refusing a
+  // distinct-case file on Linux is the safe side of a denylist.
+  const hit = (spelled: string | null): string | null => {
+    if (spelled === null) return null
+    const rel = spelled.toLowerCase()
     for (const entry of PROTECTED_PATHS) {
       if (entry.endsWith("/")) {
         if (rel.startsWith(entry)) return entry

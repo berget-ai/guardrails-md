@@ -211,3 +211,51 @@ describe("pi adapter", () => {
     expect(sdk.configs[0]?.apiKey).toBe("custom-seat")
   })
 })
+
+describe("pi adapter: protected paths", () => {
+  function writeCall(path: string): ToolCall {
+    return { type: "tool_call", toolCallId: "w1", toolName: "write", input: { path, content: "x" } }
+  }
+  function editCall(path: string): ToolCall {
+    return { type: "tool_call", toolCallId: "e1", toolName: "edit", input: { path, edits: [{ oldText: "a", newText: "b" }] } }
+  }
+
+  it("Given an edit on guardrails.md, When it is called, Then it is blocked with a reason and the human is warned", async () => {
+    const handler = await loadHandler()
+    const result = await handler(editCall(join(dir, "guardrails.md")), ctx)
+    expect(result).toMatchObject({ block: true, reason: expect.stringMatching(/protected file — guardrails\.md[\s\S]*restart pi/) })
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/^SystemOne-gate: protected file/), "warning")
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given a write under .pi/, When it is called, Then it is blocked", async () => {
+    const handler = await loadHandler()
+    const result = await handler(writeCall(join(dir, ".pi", "tool.ts")), ctx)
+    expect(result?.block).toBe(true)
+    expect(result?.reason).toContain("protected file — .pi/")
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given an edit on a plain source file, When it is called, Then it passes and the human is not warned", async () => {
+    const handler = await loadHandler()
+    await expect(handler(editCall(join(dir, "src", "a.ts")), ctx)).resolves.toBeUndefined()
+    expect(systemOne).not.toHaveBeenCalled()
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it("Given no Berget credential, When an edit on guardrails.md is called, Then it is still blocked", async () => {
+    vi.stubEnv("BERGET_API_KEY", undefined)
+    vi.stubEnv("TYPESAFE_API_KEY", undefined)
+    const handler = await loadHandler()
+    const result = await handler(editCall(join(dir, "guardrails.md")), ctx)
+    expect(result?.block).toBe(true)
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given SYSTEMONE_GATE=off, When an edit on guardrails.md is called, Then it passes", async () => {
+    vi.stubEnv("SYSTEMONE_GATE", "off")
+    const handler = await loadHandler()
+    await expect(handler(editCall(join(dir, "guardrails.md")), ctx)).resolves.toBeUndefined()
+    expect(notify).not.toHaveBeenCalled()
+  })
+})

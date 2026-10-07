@@ -1,8 +1,9 @@
 /**
  * guardrails-md for opencode — gates every bash command through core.ts
- * before it runs. A block throws, and opencode hands the message to the agent.
- * Config warnings (bad threshold, truncated guardrails.md) are shown as a
- * toast at load.
+ * before it runs, and deterministically refuses edits and writes to protected
+ * paths (edit/write/apply_patch): no model call, no threshold, no cooldown.
+ * A block throws, and opencode hands the message to the agent. Config warnings
+ * (bad threshold, truncated guardrails.md) are shown as a toast at load.
  *
  * Seat token: opencode's auth storage, maintained by @bergetai/opencode-auth.
  * Guardrails: guardrails.md or .opencode/guardrails.md, frozen at plugin load.
@@ -21,6 +22,16 @@ function opencode(): Harness {
   }
 }
 
+// *** Begin Patch / @@ patch text: every marker line names a file.
+function patchPaths(patchText: string): string[] {
+  const paths: string[] = []
+  for (const line of patchText.split("\n")) {
+    const match = line.match(/^\*\*\* (?:Add File|Update File|Delete File|Move to): +(.+?)\s*$/)
+    if (match) paths.push(match[1])
+  }
+  return paths
+}
+
 export const SystemOneGate = (async ({ directory, client }) => {
   const gate = createGate(opencode(), directory)
   // Best effort: the TUI may not be up yet, and every block reason repeats
@@ -30,9 +41,22 @@ export const SystemOneGate = (async ({ directory, client }) => {
   }
   return {
     "tool.execute.before": async (input, output) => {
-      if (input.tool !== "bash") return
-      const block = await gate.check(String(output.args?.command ?? "").trim())
-      if (block) throw new Error(block.reason)
+      if (input.tool === "bash") {
+        const block = await gate.check(String(output.args?.command ?? "").trim())
+        if (block) throw new Error(block.reason)
+        return
+      }
+      if (input.tool === "edit" || input.tool === "write") {
+        const block = gate.checkPath(String(output.args?.filePath ?? ""))
+        if (block) throw new Error(block.reason)
+        return
+      }
+      if (input.tool === "apply_patch") {
+        for (const path of patchPaths(String(output.args?.patchText ?? ""))) {
+          const block = gate.checkPath(path)
+          if (block) throw new Error(block.reason)
+        }
+      }
     },
   }
 }) satisfies Plugin

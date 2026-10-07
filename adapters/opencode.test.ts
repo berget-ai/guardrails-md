@@ -7,7 +7,7 @@ const sdk = await vi.hoisted(async () => (await import("../test/sdk-mock.ts")).c
 vi.mock("@typesafe-ai/sdk", () => sdk.module)
 const { systemOne } = sdk
 
-type Hook = (input: { tool: string }, output: { args: { command?: string } }) => Promise<void>
+type Hook = (input: { tool: string }, output: { args: { command?: string; filePath?: string; patchText?: string } }) => Promise<void>
 
 const allow = { answers: { destructive: { noul: 0.01 }, credentials: { noul: 0 } } }
 const blockDestructive = { answers: { destructive: { noul: 0.98 }, credentials: { noul: 0 } } }
@@ -98,5 +98,49 @@ describe("opencode adapter", () => {
     const hook = await loadHook()
     await hook({ tool: "bash" }, { args: { command: "ls" } })
     expect(systemOne.mock.calls[0][0].state.text).toContain("# opencode rules")
+  })
+})
+
+describe("opencode adapter: protected paths", () => {
+  it("Given an edit on guardrails.md, When the hook runs, Then it throws with the reason and the model is not asked", async () => {
+    const hook = await loadHook()
+    await expect(hook({ tool: "edit" }, { args: { filePath: join(dir, "guardrails.md") } })).rejects.toThrow(
+      /protected file — guardrails\.md[\s\S]*restart opencode/,
+    )
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given a write to .pi/guardrails.md, When the hook runs, Then it throws", async () => {
+    const hook = await loadHook()
+    await expect(hook({ tool: "write" }, { args: { filePath: join(dir, ".pi", "guardrails.md") } })).rejects.toThrow(
+      /protected file/,
+    )
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given apply_patch touching guardrails.md, When the hook runs, Then it throws and the model is not asked", async () => {
+    const hook = await loadHook()
+    const patchText = `*** Begin Patch\n*** Update File: ${join(dir, "guardrails.md")}\n@@\n@@\n*** End Patch`
+    await expect(hook({ tool: "apply_patch" }, { args: { patchText } })).rejects.toThrow(/protected file — guardrails\.md/)
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given apply_patch that names a protected file first and a plain file second, When the hook runs, Then the first block wins", async () => {
+    const hook = await loadHook()
+    const patchText =
+      `*** Begin Patch\n*** Delete File: ${join(dir, "opencode.json")}\n*** Add File: ${join(dir, "src", "new.ts")}\n+export {}\n*** End Patch`
+    await expect(hook({ tool: "apply_patch" }, { args: { patchText } })).rejects.toThrow(/protected file — opencode\.json/)
+  })
+
+  it("Given an edit on a plain source file, When the hook runs, Then it passes and the model is not asked", async () => {
+    const hook = await loadHook()
+    await expect(hook({ tool: "edit" }, { args: { filePath: join(dir, "src", "a.ts") } })).resolves.toBeUndefined()
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given SYSTEMONE_GATE=off, When an edit on guardrails.md runs, Then it passes", async () => {
+    vi.stubEnv("SYSTEMONE_GATE", "off")
+    const hook = await loadHook()
+    await expect(hook({ tool: "edit" }, { args: { filePath: join(dir, "guardrails.md") } })).resolves.toBeUndefined()
   })
 })
