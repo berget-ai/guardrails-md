@@ -108,6 +108,19 @@ describe("protectedPath", () => {
     expect(protectedPath(dir, "../guardrails.md")).toBeNull()
   })
 
+  it("Given a protected file spelled in another case, When checked, Then it is protected", async () => {
+    write(join(dir, "guardrails.md"))
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, "Guardrails.MD")).toBe("guardrails.md")
+    expect(protectedPath(dir, join(dir, ".Claude", "Settings.json"))).toBe(".claude/settings.json")
+  })
+
+  it("Given a path under a protected directory spelled in another case, When checked, Then the directory entry protects it", async () => {
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, ".PI/tool.ts")).toBe(".pi/")
+    expect(protectedPath(dir, join(dir, ".GitHub", "Workflows", "ci.yml"))).toBe(".github/workflows/")
+  })
+
   it("Given README.md, When checked, Then it is not protected", async () => {
     write(join(dir, "README.md"))
     const { protectedPath } = await loadCore()
