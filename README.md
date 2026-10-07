@@ -449,7 +449,9 @@ a new session.
 `Bash` is gated, and so is `Monitor` when it runs a shell `command` (a
 Monitor watching a WebSocket runs nothing and passes). `PowerShell` is not
 gated, mirroring pi's decision: on Windows without Git Bash, where Claude
-Code registers only PowerShell, the gate never fires.
+Code registers only PowerShell, the gate never fires. `Edit`, `Write` and
+`NotebookEdit` are not judged, but refuse writes to the [protected
+paths](#protected-files).
 
 To test the module, run `npm run test:claude`. It copies the plugin to a
 temp folder and runs `claude plugin test` there, because that command
