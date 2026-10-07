@@ -252,7 +252,7 @@ files; `.claude/settings*.json` can disable the plugin (the rest of
 `.claude/` — CLAUDE.md, skills, rules — is content an agent legitimately
 edits); `.github/workflows/` is what runs your CI. Symlinks are resolved in
 every harness, so a link that lands on a protected file is protected under
-its own name too. `SYSTEMONE_PROTECT` extends the list (see Configuration).
+its own name too.
 
 The list guards the file-editing tools, not bash: `echo >> guardrails.md` is
 not matched against the list — it goes to the decision model like every
@@ -339,7 +339,6 @@ credentials, sandboxes and human review still matter.
 | `SYSTEMONE_THRESHOLD` | `0.7` | Block threshold, strictly between 0 and 1. Anything else (`abc`, empty, `0`, `1`, …) falls back to `0.7` with a warning |
 | `SYSTEMONE_FAIL_OPEN` | – | Set to `1` to let commands run when the endpoint is unreachable (default is fail-closed) |
 | `SYSTEMONE_GATE` | – | Set to `off` to disable the gate |
-| `SYSTEMONE_PROTECT` | – | Comma-separated extra protected paths, same form as the built-in list (e.g. `docs/policy.md,deploy/`); read once at gate creation |
 | `SYSTEMONE_LOG` | – | Set to `1` to write the audit log |
 
 Credentials resolve per request: seat token, then `BERGET_API_KEY`, then
