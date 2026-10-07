@@ -235,8 +235,8 @@ opencode.jsonc
 .github/workflows/
 ```
 
-The refusal is deterministic — no model call, no threshold, no cooldown, and
-retrying costs nothing — and the message tells the agent whose file this is:
+While the gate is on, the refusal is deterministic — no model call, no
+threshold, no cooldown, and retrying costs nothing — and the message tells the agent whose file this is:
 
 ```
 SystemOne-gate: protected file — guardrails.md

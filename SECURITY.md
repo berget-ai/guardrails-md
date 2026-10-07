@@ -26,6 +26,9 @@ find a way to break the stated guarantees, we want to hear about it:
   the model, not by the list. In pi, the
   `powershell` tool is not gated; in Claude Code, `Bash` and `Monitor`'s
   shell `command` are gated and `PowerShell` is not.
+- The protected list is relative to the project root. Configuration outside
+  it — `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, a
+  user-scope plugin install — is not protected, and an agent can edit it.
 - Claude Code hooks modules are an early-access API. The module fails
   closed through its `.catch` handler; an engine change that bypassed
   module hooks entirely would leave Bash ungated.
