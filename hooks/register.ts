@@ -353,7 +353,9 @@ function relUnder(root: string, path: string): string | null {
 // spelling), like core.ts matches both spellings.
 function protectedPath(root: string, resolved: string): string | null {
   if (!root || !resolved) return null
-  const rel = relUnder(root, resolved)
+  // Case-folded like core.ts: `Guardrails.MD` opens guardrails.md on a
+  // case-insensitive filesystem.
+  const rel = relUnder(root, resolved)?.toLowerCase() ?? null
   if (rel === null) return null
   for (const entry of PROTECTED_PATHS) {
     if (entry.endsWith("/")) {
