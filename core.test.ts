@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Harness } from "./core.ts"
@@ -67,6 +67,100 @@ afterEach(() => {
   vi.useRealTimers()
   rmSync(home, { recursive: true, force: true })
   rmSync(dir, { recursive: true, force: true })
+})
+
+describe("protectedPath", () => {
+  function write(p: string) {
+    mkdirSync(p.replace(/\/+[^/]+$/, ""), { recursive: true })
+    writeFileSync(p, "content")
+  }
+
+  it("Given a relative path to guardrails.md, When checked, Then it is protected", async () => {
+    write(join(dir, "guardrails.md"))
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, "guardrails.md")).toBe("guardrails.md")
+    expect(protectedPath(dir, join(dir, "guardrails.md"))).toBe("guardrails.md")
+  })
+
+  it("Given an absolute path under .github/workflows/, When checked, Then the directory entry protects it", async () => {
+    write(join(dir, ".github", "workflows", "ci.yml"))
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, join(dir, ".github", "workflows", "ci.yml"))).toBe(".github/workflows/")
+  })
+
+  it("Given a symlink to guardrails.md under another name, When checked, Then it is protected", async () => {
+    write(join(dir, "guardrails.md"))
+    symlinkSync("guardrails.md", join(dir, "notes.md"))
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, join(dir, "notes.md"))).toBe("guardrails.md")
+  })
+
+  it("Given a not-yet-existing file under a symlinked .pi/, When checked, Then it is protected", async () => {
+    mkdirSync(join(dir, "real-pi"))
+    symlinkSync("real-pi", join(dir, ".pi"))
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, join(dir, ".pi", "evil.md"))).toBe(".pi/")
+  })
+
+  it("Given a path outside the project, When checked, Then it is not protected", async () => {
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, join(home, "elsewhere", "guardrails.md"))).toBeNull()
+    expect(protectedPath(dir, "../guardrails.md")).toBeNull()
+  })
+
+  it("Given README.md, When checked, Then it is not protected", async () => {
+    write(join(dir, "README.md"))
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, "README.md")).toBeNull()
+  })
+})
+
+describe("checkPath", () => {
+  it("Given a write to guardrails.md, When checked, Then the reason names the file and tells the human", async () => {
+    const gate = await makeGate()
+    expect(gate.checkPath(join(dir, "guardrails.md"))).toMatchObject({
+      reason: expect.stringMatching(
+        /protected file — guardrails\.md[\s\S]*edited by your human, not the agent[\s\S]*Ask them to make the change and restart opencode/,
+      ),
+    })
+  })
+
+  it("Given a write under .pi/, When checked, Then the directory entry is named", async () => {
+    const gate = await makeGate()
+    expect(gate.checkPath(join(dir, ".pi", "custom-tool.ts"))).toMatchObject({
+      reason: expect.stringMatching(/protected file — \.pi\//),
+    })
+  })
+
+  it("Given warnings, When checkPath blocks, Then the reason carries the warnings suffix", async () => {
+    const gate = await makeGate({ SYSTEMONE_THRESHOLD: "abc" })
+    const block = gate.checkPath(join(dir, "guardrails.md"))
+    expect(block?.reason).toContain("SYSTEMONE_THRESHOLD")
+  })
+
+  it("Given SYSTEMONE_GATE=off, When checkPath is called, Then nothing is protected", async () => {
+    const gate = await makeGate({ SYSTEMONE_GATE: "off" })
+    expect(gate.checkPath(join(dir, "guardrails.md"))).toBeNull()
+  })
+
+  it("Given an empty path, When checked, Then nothing is protected", async () => {
+    const gate = await makeGate()
+    expect(gate.checkPath("")).toBeNull()
+  })
+})
+
+describe("checkPath does not feed the cooldown", () => {
+  it("Given blocked bash and repeated refused edits, When bash is checked after the first cooldown, Then it is judged normally", async () => {
+    vi.useFakeTimers()
+    systemOne.mockResolvedValue(blockDestructive)
+    const gate = await makeGate()
+    await expect(gate.check("a")).resolves.not.toBeNull()
+    for (let i = 0; i < 5; i++) expect(gate.checkPath(join(dir, "guardrails.md"))).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(10)
+    systemOne.mockResolvedValue(structuredClone(allow))
+    await expect(gate.check("b")).resolves.toBeNull()
+    expect(systemOne).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe("gatewayRoot", () => {

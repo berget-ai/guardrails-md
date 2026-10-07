@@ -6,7 +6,10 @@
  *
  * Flow: createGate() freezes guardrails.md → check(command) answers all
  * questions in one forward pass (~100 ms) → a reason above threshold, else
- * null.
+ * null. checkPath(path) is the deterministic backstop in front of that:
+ * writes to protected paths (the policy, the harness config, CI workflows)
+ * are refused — no model call, no threshold, no cooldown — so a session
+ * cannot rule the next one under its own rules.
  *
  * Questions (noul, 0..1):
  *   destructive          — deletes/destroys data, databases, clusters, infra?
@@ -26,7 +29,8 @@
  * TYPESAFE_* vars), SYSTEMONE_THRESHOLD (0.7), SYSTEMONE_FAIL_OPEN=1,
  * SYSTEMONE_GATE=off, SYSTEMONE_LOG=1.
  */
-import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
+import { appendFileSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { basename, dirname, isAbsolute, join } from "node:path"
 import { noul, TypeSafeClient } from "@typesafe-ai/sdk"
 
 export interface Harness {
@@ -81,6 +85,98 @@ type Verdict = {
   credentials: number
   guardrails_violation?: number
   policy_exception?: number
+}
+
+// --- protected paths --------------------------------------------------------
+// A deterministic deny sits in front of the model: writes to the policy and
+// harness configuration are refused in every harness, without a verdict,
+// without a threshold and without the cooldown. The list is relative to the
+// project root; an entry ending in `/` protects everything below it. No globs:
+// an agent cannot smuggle a path past a pattern it can spell.
+export const PROTECTED_PATHS = Object.freeze([
+  "guardrails.md",
+  ".agents/guardrails.md",
+  ".opencode/guardrails.md",
+  ".pi/guardrails.md",
+  ".claude/guardrails.md",
+  "opencode.json",
+  "opencode.jsonc",
+  ".opencode/",
+  ".pi/",
+  ".claude/settings.json",
+  ".claude/settings.local.json",
+  ".github/workflows/",
+])
+
+// A path as its spelling says: `.` and `..` folded, doubles collapsed, no
+// symlink followed. Duplicated in the Claude Code module — keep them in step.
+function foldPath(p: string): string {
+  const absolute = p.startsWith("/")
+  const out: string[] = []
+  for (const part of p.split("/")) {
+    if (!part || part === ".") continue
+    if (part === "..") {
+      if (out.length > 0) out.pop()
+    } else {
+      out.push(part)
+    }
+  }
+  return absolute ? `/${out.join("/")}` : out.join("/")
+}
+
+// The path relative to the root by spelling, or null when it names nothing
+// under it, the root itself included.
+function relUnder(root: string, path: string): string | null {
+  const r = foldPath(root)
+  const p = foldPath(path)
+  if (r === "") return p || null
+  if (p === r) return null
+  if (r === "/") return p.slice(1)
+  return p.startsWith(`${r}/`) ? p.slice(r.length + 1) : null
+}
+
+// Where a path lands: the path as spelled, every symlink followed — including
+// the ancestors of a file that does not exist yet, so a write into a linked
+// directory cannot hide behind the missing file. Deny only when nothing
+// resolves (a non-ENOENT error on the way up); the placed path may sit outside
+// the root, which the caller treats as not protected.
+function placePath(absolute: string): string | null {
+  let target = absolute
+  const tail: string[] = []
+  for (;;) {
+    try {
+      return tail.length === 0 ? realpathSync(target) : join(realpathSync(target), ...tail)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") return null
+      tail.unshift(basename(target))
+      const parent = dirname(target)
+      if (parent === target) return null
+      target = parent
+    }
+  }
+}
+
+// The matching entry, or null. Both spellings are matched: the placed one so a
+// symlink cannot rename a protected file, and the literal one so a symlinked
+// `.pi/`-style directory is protected under its target too. A path outside the
+// root is never protected.
+export function protectedPath(root: string, candidate: string): string | null {
+  if (!candidate) return null
+  const rootReal = realpathSync(root)
+  const absolute = isAbsolute(candidate) ? foldPath(candidate) : foldPath(join(root, candidate))
+  const hit = (rel: string | null): string | null => {
+    if (rel === null) return null
+    for (const entry of PROTECTED_PATHS) {
+      if (entry.endsWith("/")) {
+        if (rel.startsWith(entry)) return entry
+      } else if (rel === entry) {
+        return entry
+      }
+    }
+    return null
+  }
+  const placed = placePath(absolute)
+  return hit(relUnder(root, absolute)) ?? hit(placed === null ? null : relUnder(rootReal, placed))
 }
 
 // --- guardrails.md ----------------------------------------------------------
@@ -334,6 +430,7 @@ function blockMessage(outcome: Outcome, hasGuardrails: boolean, harness: string)
 }
 
 export function createGate(harness: Harness, directory: string) {
+  const root = realpathSync(directory)
   // Freeze guardrails NOW, before any command is judged. A lazy first-read
   // would let an agent weaken guardrails.md via the ungated edit tools
   // before issuing its first bash command and rule the whole session under
@@ -445,9 +542,24 @@ export function createGate(harness: Harness, directory: string) {
     return { reason: blockMessage(outcome, hasGuardrails, harness.name) + `\n  ${command.slice(0, 200)}` }
   }
 
+  // A rule, not a verdict: no endpoint call, no threshold, and the cooldown
+  // counter is untouched — an agent that retries a refused edit pays nothing,
+  // it simply never gets to write the file. Honours SYSTEMONE_GATE=off.
+  function checkPath(path: string): Block | null {
+    if (process.env.SYSTEMONE_GATE === "off") return null
+    const hit = protectedPath(root, path)
+    if (!hit) return null
+    const reason =
+      `SystemOne-gate: protected file — ${hit}\n` +
+      `  Policy and harness configuration are edited by your human, not the agent.\n` +
+      `  Ask them to make the change and restart ${harness.name}.`
+    if (warnings.length === 0) return { reason }
+    return { reason: [reason, ...warnings.map((w) => `  ${w}`)].join("\n") }
+  }
+
   function hasCredential(resolvedKey?: string): boolean {
     return !!apiKey(harness.authPath, resolvedKey)
   }
 
-  return { check, hasCredential, warnings }
+  return { check, checkPath, hasCredential, warnings }
 }
