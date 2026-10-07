@@ -160,14 +160,13 @@ function placePath(absolute: string): string | null {
 // symlink cannot rename a protected file, and the literal one so a symlinked
 // `.pi/`-style directory is protected under its target too. A path outside the
 // root is never protected.
-export function protectedPath(root: string, candidate: string, extra: string[] = []): string | null {
+export function protectedPath(root: string, candidate: string): string | null {
   if (!candidate) return null
   const rootReal = realpathSync(root)
   const absolute = isAbsolute(candidate) ? foldPath(candidate) : foldPath(join(root, candidate))
-  const list = extra.length > 0 ? [...PROTECTED_PATHS, ...extra] : PROTECTED_PATHS
   const hit = (rel: string | null): string | null => {
     if (rel === null) return null
-    for (const entry of list) {
+    for (const entry of PROTECTED_PATHS) {
       if (entry.endsWith("/")) {
         if (rel.startsWith(entry)) return entry
       } else if (rel === entry) {
@@ -178,13 +177,6 @@ export function protectedPath(root: string, candidate: string, extra: string[] =
   }
   const placed = placePath(absolute)
   return hit(relUnder(root, absolute)) ?? hit(placed === null ? null : relUnder(rootReal, placed))
-}
-
-function protectEntries(raw: string | undefined): string[] {
-  return (raw ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry !== "")
 }
 
 // --- guardrails.md ----------------------------------------------------------
@@ -550,14 +542,12 @@ export function createGate(harness: Harness, directory: string) {
     return { reason: blockMessage(outcome, hasGuardrails, harness.name) + `\n  ${command.slice(0, 200)}` }
   }
 
-  const protect = [...PROTECTED_PATHS, ...protectEntries(process.env.SYSTEMONE_PROTECT)]
-
   // A rule, not a verdict: no endpoint call, no threshold, and the cooldown
   // counter is untouched — an agent that retries a refused edit pays nothing,
   // it simply never gets to write the file. Honours SYSTEMONE_GATE=off.
   function checkPath(path: string): Block | null {
     if (process.env.SYSTEMONE_GATE === "off") return null
-    const hit = protectedPath(root, path, protect)
+    const hit = protectedPath(root, path)
     if (!hit) return null
     const reason =
       `SystemOne-gate: protected file — ${hit}\n` +

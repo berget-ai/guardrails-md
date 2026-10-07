@@ -113,12 +113,6 @@ describe("protectedPath", () => {
     const { protectedPath } = await loadCore()
     expect(protectedPath(dir, "README.md")).toBeNull()
   })
-
-  it("Given extra entries, When checked, Then they protect like the defaults", async () => {
-    const { protectedPath } = await loadCore()
-    expect(protectedPath(dir, join(dir, "docs", "policy.md"), ["docs/policy.md"])).toBe("docs/policy.md")
-    expect(protectedPath(dir, join(dir, "docs", "policy.md"))).toBeNull()
-  })
 })
 
 describe("checkPath", () => {
@@ -144,12 +138,6 @@ describe("checkPath", () => {
     expect(block?.reason).toContain("SYSTEMONE_THRESHOLD")
   })
 
-  it("Given SYSTEMONE_PROTECT, When the gate is created, Then the extra path is protected and frozen", async () => {
-    const gate = await makeGate({ SYSTEMONE_PROTECT: " docs/policy.md , deploy/ " })
-    expect(gate.checkPath(join(dir, "docs", "policy.md"))).not.toBeNull()
-    expect(gate.checkPath(join(dir, "deploy", "prod.sh"))).not.toBeNull()
-    expect(gate.checkPath(join(dir, "README.md"))).toBeNull()
-  })
 
   it("Given SYSTEMONE_GATE=off, When checkPath is called, Then nothing is protected", async () => {
     const gate = await makeGate({ SYSTEMONE_GATE: "off" })
