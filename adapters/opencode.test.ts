@@ -7,7 +7,7 @@ const sdk = await vi.hoisted(async () => (await import("../test/sdk-mock.ts")).c
 vi.mock("@typesafe-ai/sdk", () => sdk.module)
 const { systemOne } = sdk
 
-type Hook = (input: { tool: string }, output: { args: { command?: string } }) => Promise<void>
+type Hook = (input: { tool: string }, output: { args: { command?: string; filePath?: string; patchText?: string } }) => Promise<void>
 
 const allow = { answers: { destructive: { noul: 0.01 }, credentials: { noul: 0 } } }
 const blockDestructive = { answers: { destructive: { noul: 0.98 }, credentials: { noul: 0 } } }

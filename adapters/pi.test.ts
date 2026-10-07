@@ -217,7 +217,7 @@ describe("pi adapter: protected paths", () => {
     return { type: "tool_call", toolCallId: "w1", toolName: "write", input: { path, content: "x" } }
   }
   function editCall(path: string): ToolCall {
-    return { type: "tool_call", toolCallId: "e1", toolName: "edit", input: { path, old_string: "a", new_string: "b" } }
+    return { type: "tool_call", toolCallId: "e1", toolName: "edit", input: { path, edits: [{ oldText: "a", newText: "b" }] } }
   }
 
   it("Given an edit on guardrails.md, When it is called, Then it is blocked with a reason and the human is warned", async () => {
