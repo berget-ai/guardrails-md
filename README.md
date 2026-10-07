@@ -252,7 +252,8 @@ files; `.claude/settings*.json` can disable the plugin (the rest of
 `.claude/` — CLAUDE.md, skills, rules — is content an agent legitimately
 edits); `.github/workflows/` is what runs your CI. Symlinks are resolved in
 every harness, so a link that lands on a protected file is protected under
-its own name too.
+its own name too. Matching ignores case on every platform, so
+`Guardrails.MD` is protected as well.
 
 The list guards the file-editing tools, not bash: `echo >> guardrails.md` is
 not matched against the list — it goes to the decision model like every
