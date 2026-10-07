@@ -9,23 +9,35 @@ const destructive = { answers: { destructive: { noul: 0.98 }, credentials: { nou
 interface World {
   env?: Record<string, string>
   files?: Record<string, string>
+  links?: Record<string, string>
+  dangling?: string[]
   answer?: () => { status: number; body: unknown } | Promise<never>
 }
 
 const hang = () => new Promise<never>(() => {})
 
-function world(on: On, { env = { BERGET_API_KEY: "k" }, files = {}, answer = () => ({ status: 200, body: allow }) }: World) {
+function world(on: On, { env = { BERGET_API_KEY: "k" }, files = {}, links = {}, dangling = [], answer = () => ({ status: 200, body: allow }) }: World) {
   const fetches: { url: string; headers: Record<string, string>; body: string }[] = []
   const toasts: string[] = []
   const ran: string[] = []
   const clock = mock.clock(on)
   mock.env(on, env)
   on("fs.read", ($, e) => (e.path in files ? { value: files[e.path] } : { deny: `ENOENT ${e.path}` }))
-  on("fs.stat", ($, e) =>
-    e.path in files
-      ? { value: { kind: "file" as const, size: files[e.path].length, mtimeMs: 0, isLink: false } }
-      : { deny: `ENOENT ${e.path}` },
-  )
+  on("fs.stat", ($, e) => {
+    const target = e.resolve && e.path in links ? links[e.path] : e.path
+    if (e.resolve && dangling.includes(e.path)) {
+      return { value: { kind: "other" as const, size: 0, mtimeMs: 0, isLink: true } }
+    }
+    if (target in files) {
+      const stat = { kind: "file" as const, size: files[target].length, mtimeMs: 0, isLink: e.resolve && target !== e.path }
+      return { value: e.resolve ? { ...stat, realPath: target } : stat }
+    }
+    if (target === CWD || target === "/" || target === `${CWD}/` || target === "." || target === links[CWD]) {
+      const stat = { kind: "dir" as const, size: 0, mtimeMs: 0, isLink: e.resolve && target !== e.path }
+      return { value: e.resolve ? { ...stat, realPath: target === "." ? CWD : target } : stat }
+    }
+    return { deny: `ENOENT ${e.path}` }
+  })
   on("http.fetch", async ($, e) => {
     fetches.push({ url: e.url, headers: e.init?.headers ?? {}, body: e.init?.body ?? "" })
     try {
@@ -42,6 +54,10 @@ function world(on: On, { env = { BERGET_API_KEY: "k" }, files = {}, answer = () 
   on("session.start", ($, e) => ({ cwd: e.cwd }))
   on("tool.call", { tool: ["Bash", "Monitor"] }, ($, e) => {
     ran.push(e.tool === "Monitor" && e.ws ? `ws ${e.ws.url}` : String(e.command))
+    return { result: {} }
+  })
+  on("tool.call", { tool: ["Edit", "Write", "NotebookEdit"] }, ($, e) => {
+    ran.push(e.tool === "NotebookEdit" ? String(e.notebook_path) : String(e.file_path))
     return { result: {} }
   })
   return { fetches, toasts, ran, clock }
@@ -178,5 +194,108 @@ describe("guardrails-md mod", () => {
     await bash($, "rm -rf ./data")
     expect(w.fetches).toEqual([])
     expect(w.ran).toEqual(["rm -rf ./data"])
+  })
+
+  test("Given an Edit on guardrails.md, When the path is protected, Then the call is denied and the tool does not run", async ($, on) => {
+    const w = world(on, { files: { [`${CWD}/guardrails.md`]: POLICY } })
+    await start($)
+    const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/guardrails.md`, old_string: "a", new_string: "b" })
+    expect(out.deny).toContain(`SystemOne-gate: protected file — guardrails.md`)
+    expect(out.deny).toContain("restart claude")
+    expect(w.fetches).toEqual([])
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given a Write on .claude/settings.json, When the path is protected, Then the call is denied", async ($, on) => {
+    const w = world(on, { files: { [`${CWD}/.claude/settings.json`]: "{}" } })
+    await start($)
+    const out = await $.tool.call({ tool: "Write", file_path: `${CWD}/.claude/settings.json`, content: "{}" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — .claude/settings.json")
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given a Write on .claude/settings.json that does not exist yet, When the path is protected, Then the call is denied", async ($, on) => {
+    const w = world(on, {})
+    await start($)
+    const out = await $.tool.call({ tool: "Write", file_path: `${CWD}/.claude/settings.json`, content: "{}" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — .claude/settings.json")
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given a NotebookEdit under .pi/, When the directory is protected, Then the call is denied", async ($, on) => {
+    const w = world(on, { files: { [`${CWD}/.pi/x.ipynb`]: "{}" } })
+    await start($)
+    const out = await $.tool.call({ tool: "NotebookEdit", notebook_path: `${CWD}/.pi/x.ipynb`, new_source: "{}" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — .pi/")
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given an Edit through a link that lands on guardrails.md, When the link resolves there, Then the call is denied", async ($, on) => {
+    const w = world(on, { files: { [`${CWD}/guardrails.md`]: POLICY }, links: { [`${CWD}/notes.md`]: `${CWD}/guardrails.md` } })
+    await start($)
+    const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/notes.md`, old_string: "a", new_string: "b" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — guardrails.md")
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given an Edit on .github/workflows/ci.yml, When the directory is protected, Then the call is denied", async ($, on) => {
+    const w = world(on, { files: { [`${CWD}/.github/workflows/ci.yml`]: "on: push" } })
+    await start($)
+    const out = await $.tool.call({ tool: "Write", file_path: `${CWD}/.github/workflows/ci.yml`, content: "on: push" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — .github/workflows/")
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given an Edit on src/a.ts, When the path is not protected, Then the tool runs", async ($, on) => {
+    const w = world(on, { files: { [`${CWD}/src/a.ts`]: "export {}" } })
+    await start($)
+    const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/src/a.ts`, old_string: "a", new_string: "b" })
+    expect(out.deny).toBeUndefined()
+    expect(w.fetches).toEqual([])
+    expect(w.ran).toEqual([`${CWD}/src/a.ts`])
+  })
+
+  test("Given no credential and an Edit on guardrails.md, When the path is protected, Then the call is still denied", async ($, on) => {
+    const w = world(on, { env: {}, files: { [`${CWD}/guardrails.md`]: POLICY } })
+    await start($)
+    const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/guardrails.md`, old_string: "a", new_string: "b" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — guardrails.md")
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given a Write to Guardrails.MD, When the protected file is spelled in another case, Then the call is denied", async ($, on) => {
+    const w = world(on, { env: { BERGET_API_KEY: "k" }, files: { [`${CWD}/guardrails.md`]: POLICY } })
+    await start($)
+    const out = await $.tool.call({ tool: "Write", file_path: `${CWD}/Guardrails.MD`, content: "new" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — guardrails.md")
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given SYSTEMONE_GATE=off and an Edit on guardrails.md, When the path guard is off, Then the tool runs", async ($, on) => {
+    const w = world(on, { env: { BERGET_API_KEY: "k", SYSTEMONE_GATE: "off" }, files: { [`${CWD}/guardrails.md`]: POLICY } })
+    await start($)
+    const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/guardrails.md`, old_string: "a", new_string: "b" })
+    expect(out.deny).toBeUndefined()
+    expect(w.ran).toEqual([`${CWD}/guardrails.md`])
+  })
+
+  test("Given a session whose cwd is a link to the real root and .pi is a link elsewhere, When Edit targets CWD/.pi/x.ts, Then the call is denied as protected", async ($, on) => {
+    const w = world(on, {
+      files: { "/other/x.ts": "" },
+      links: { [CWD]: "/real", [`${CWD}/.pi/x.ts`]: "/other/x.ts" },
+    })
+    await start($)
+    const out = await $.tool.call({ tool: "Write", file_path: `${CWD}/.pi/x.ts`, content: "" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — .pi/")
+    expect(w.ran).toEqual([])
+  })
+
+  test("Given an Edit on a link whose stat resolves with no realPath, When the hook runs, Then the call is denied as unresolvable and the tool does not run", async ($, on) => {
+    const w = world(on, { dangling: [`${CWD}/dangling.md`] })
+    await start($)
+    const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/dangling.md`, old_string: "a", new_string: "b" })
+    expect(out.deny).toContain(`SystemOne-gate: cannot resolve ${JSON.stringify(`${CWD}/dangling.md`)}`)
+    expect(out.deny).toContain("fail-closed")
+    expect(w.ran).toEqual([])
   })
 })
