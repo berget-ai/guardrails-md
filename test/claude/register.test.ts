@@ -263,14 +263,6 @@ describe("guardrails-md mod", () => {
     expect(w.ran).toEqual([])
   })
 
-  test("Given SYSTEMONE_PROTECT=docs/policy.md, When Write runs on that file, Then the call is denied", async ($, on) => {
-    const w = world(on, { files: { [`${CWD}/docs/policy.md`]: "rules" }, env: { BERGET_API_KEY: "k", SYSTEMONE_PROTECT: "docs/policy.md" } })
-    await start($)
-    const out = await $.tool.call({ tool: "Write", file_path: `${CWD}/docs/policy.md`, content: "new" })
-    expect(out.deny).toContain("SystemOne-gate: protected file — docs/policy.md")
-    expect(w.ran).toEqual([])
-  })
-
   test("Given SYSTEMONE_GATE=off and an Edit on guardrails.md, When the path guard is off, Then the tool runs", async ($, on) => {
     const w = world(on, { env: { BERGET_API_KEY: "k", SYSTEMONE_GATE: "off" }, files: { [`${CWD}/guardrails.md`]: POLICY } })
     await start($)

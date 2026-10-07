@@ -351,11 +351,11 @@ function relUnder(root: string, path: string): string | null {
 
 // The matching entry, or null. Called twice (placed path, then literal
 // spelling), like core.ts matches both spellings.
-function protectedPath(root: string, resolved: string, list: readonly string[]): string | null {
+function protectedPath(root: string, resolved: string): string | null {
   if (!root || !resolved) return null
   const rel = relUnder(root, resolved)
   if (rel === null) return null
-  for (const entry of list) {
+  for (const entry of PROTECTED_PATHS) {
     if (entry.endsWith("/")) {
       if (rel.startsWith(entry)) return entry
     } else if (rel === entry) {
@@ -371,10 +371,6 @@ function protectedMessage(entry: string): string {
     `  Policy and harness configuration are edited by your human, not the agent.\n` +
     `  Ask them to make the change and restart ${HARNESS}.`
   )
-}
-
-function protectList(raw: string | undefined): string[] {
-  return [...PROTECTED_PATHS, ...(raw ?? "").split(",").map((entry) => entry.trim()).filter((entry) => entry !== "")]
 }
 
 // Where the path lands, every symlink followed — including for a file that
@@ -431,7 +427,6 @@ interface Session {
   off: boolean
   cwd: string
   root: string
-  protect: string[]
   warnings: string[]
   cooldown: ReturnType<typeof createCooldown>
 }
@@ -465,7 +460,6 @@ export const register: Register = (on) => {
     session = {
       cwd: e.cwd,
       root: rootStat?.realPath && rootStat.realPath !== "" ? rootStat.realPath : e.cwd,
-      protect: protectList(await $.env.get("SYSTEMONE_PROTECT")),
       guardrails,
       key: (await $.env.get("BERGET_API_KEY")) ?? (await $.env.get("TYPESAFE_API_KEY")),
       baseURL: gatewayRoot((await $.env.get("BERGET_BASE_URL")) ?? (await $.env.get("TYPESAFE_BASE_URL")) ?? "https://api.berget.ai"),
@@ -556,7 +550,7 @@ export const register: Register = (on) => {
           `  The path could not be checked against the protected list.`,
       }
     }
-    const hit = protectedPath(s.root, placed, s.protect) ?? protectedPath(s.cwd, target, s.protect)
+    const hit = protectedPath(s.root, placed) ?? protectedPath(s.cwd, target)
     if (hit === null) return next(e)
     return { deny: [protectedMessage(hit), ...s.warnings.map((w) => `  ${w}`)].join("\n") }
   }).catch(($, e, next) => ({
