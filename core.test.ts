@@ -138,7 +138,6 @@ describe("checkPath", () => {
     expect(block?.reason).toContain("SYSTEMONE_THRESHOLD")
   })
 
-
   it("Given SYSTEMONE_GATE=off, When checkPath is called, Then nothing is protected", async () => {
     const gate = await makeGate({ SYSTEMONE_GATE: "off" })
     expect(gate.checkPath(join(dir, "guardrails.md"))).toBeNull()
