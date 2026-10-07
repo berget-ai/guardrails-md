@@ -412,7 +412,7 @@ either. What differs is where the gate looks.
 
 | | opencode | pi | Claude Code |
 |---|---|---|---|
-| Hook | `tool.execute.before`, bash only | `tool_call`, bash only, including calls a codemode script makes | hooks module: `tool.call` on `Bash` and on `Monitor` when it runs a `command`; `session.start` freezes the policy, the root and the environment |
+| Hook | `tool.execute.before`: bash judged; `edit`, `write` and `apply_patch` checked against the protected paths | `tool_call`, including calls a codemode script makes: bash judged; `edit` and `write` checked against the protected paths | hooks module: `tool.call` on `Bash` and on `Monitor` when it runs a `command`; `Edit`, `Write` and `NotebookEdit` checked against the protected paths; `session.start` freezes the policy, the root and the environment |
 | On block | throws; the agent reads the message | returns `{ block, reason }` to the agent and shows a warning to you (on stderr in `pi -p`) | answers `{ deny }`; Claude reads the reason |
 | Without a credential | inactive; one log line with `SYSTEMONE_LOG=1` | inactive; warns you once per session (on stderr in `pi -p`) | inactive; a toast warns you at session start |
 | Seat token | `$XDG_DATA_HOME/opencode/auth.json` (default `~/.local/share`) | pi's Berget login, OAuth or API key, resolved by pi itself; then the OAuth entry in `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent`) | none — `BERGET_API_KEY` (or `TYPESAFE_API_KEY`) only |
