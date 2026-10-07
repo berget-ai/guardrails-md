@@ -19,17 +19,25 @@ We aim to acknowledge reports within two business days.
 These are documented design decisions, not vulnerabilities — but if you
 find a way to break the stated guarantees, we want to hear about it:
 
-- The gate judges bash commands only; file edits pass through. In pi, the
+- The gate judges bash commands only; other tool calls pass through, except
+  that the file-editing tools refuse writes to protected paths in every
+  harness (see the protected list in the README). A bash write such as
+  `echo >> guardrails.md` is not matched against the list — it is judged by
+  the model, not by the list. In pi, the
   `powershell` tool is not gated; in Claude Code, `Bash` and `Monitor`'s
   shell `command` are gated and `PowerShell` is not.
+- The protected list is relative to the project root. Configuration outside
+  it — `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, a
+  user-scope plugin install — is not protected, and an agent can edit it.
 - Claude Code hooks modules are an early-access API. The module fails
   closed through its `.catch` handler; an engine change that bypassed
   module hooks entirely would leave Bash ungated.
 - `guardrails.md` is read once at session start but lives in the repo —
-  an agent with edit access can weaken the rules for the next session,
-  including by padding the file so rules fall past the 2000-character
-  limit. The gate warns when the file is cut, but does not apply the cut
-  rules.
+  the edit tools refuse to touch it and the other protected paths, and the
+  running session judges under the frozen copy, but a bash write can still
+  weaken the rules for the next session, including by padding the file so
+  rules fall past the 2000-character limit. The gate warns when the file is
+  cut, but does not apply the cut rules.
 - The gate does not decode obfuscated payloads (base64 etc.).
 - The model is a trained classifier (~96% on held-out tests) and errs in
   both directions.
