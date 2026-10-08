@@ -419,21 +419,21 @@ either. What differs is where the gate looks.
 | On block | throws; the agent reads the message | returns `{ block, reason }` to the agent and shows a warning to you (on stderr in `pi -p`) | answers `{ deny }`; Claude reads the reason |
 | Without a credential | inactive; one log line with `SYSTEMONE_LOG=1` | inactive; warns you once per session (on stderr in `pi -p`) | inactive; a toast warns you at session start |
 | Seat token | `$XDG_DATA_HOME/opencode/auth.json` (default `~/.local/share`) | pi's Berget login, OAuth or API key, resolved by pi itself; then the OAuth entry in `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent`) | none — `BERGET_API_KEY` (or `TYPESAFE_API_KEY`) only |
-| Policy file | `guardrails.md`, then `.opencode/guardrails.md` | `guardrails.md`, then `.pi/guardrails.md` | `guardrails.md`, then `.claude/guardrails.md` |
+| Policy file | `GUARDRAILS.md`, then `.opencode/GUARDRAILS.md` (lowercase legacy names after) | `GUARDRAILS.md`, then `.pi/GUARDRAILS.md` (lowercase legacy names after) | `GUARDRAILS.md`, then `.claude/GUARDRAILS.md` (lowercase legacy names after) |
 | Policy read from | the project directory opencode passes the plugin | the directory pi was started in | the session's directory, frozen at `session.start` |
 | Audit log | `~/.cache/opencode/systemone-gate.log` | `~/.cache/pi/systemone-gate.log` | not supported (`$.fs` cannot append) |
 | Protected files | `edit`, `write`, `apply_patch` refuse protected paths; a block throws | `edit` and `write` refuse protected paths; a block returns `{ block, reason }` and warns you | `Edit`, `Write` and `NotebookEdit` refuse protected paths; the module answers `{ deny }`. Symlinks are resolved in all three |
 
-In pi, `/reload` counts as a restart: it re-reads `guardrails.md` and resets
+In pi, `/reload` counts as a restart: it re-reads `GUARDRAILS.md` and resets
 the cooldown. pi's `powershell` tool is not gated; if a repo enables it in
 `.pi/settings.json`, commands run through it skip the gate.
 
 In Claude Code, the module lives as long as the session, so the frozen
 policy, the environment and the cooldown stay in memory, as in opencode
 and pi. `session.start` fires once per session and not on `/compact`, so
-compaction neither re-reads `guardrails.md` nor resets the cooldown;
+compaction neither re-reads `GUARDRAILS.md` nor resets the cooldown;
 `/clear` keeps both too. Starting a new session, or a hot reload while
-developing the plugin, re-reads `guardrails.md` and resets the cooldown.
+developing the plugin, re-reads `GUARDRAILS.md` and resets the cooldown.
 
 Claude Code skips a hook that throws or overruns and lets the call
 through, so the module attaches a `.catch` handler that denies instead:

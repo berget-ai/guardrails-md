@@ -1,7 +1,7 @@
 {
   "name": "guardrails-md",
   "version": "0.7.0",
-  "description": "guardrails.md gate: a System One decision model judges every Bash command before it runs — destructive / credentials / guardrails.md policy",
+  "description": "GUARDRAILS.md gate: a System One decision model judges every Bash command before it runs — destructive / credentials / GUARDRAILS.md policy",
   "author": {
     "name": "Berget AI"
   },

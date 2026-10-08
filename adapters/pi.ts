@@ -45,8 +45,18 @@ function piPath(raw: string): string {
   const path = raw.startsWith("@") ? raw.slice(1) : raw
   if (path === "~") return homedir()
   if (path.startsWith("~/")) return join(homedir(), path.slice(2))
-  if (path.startsWith("file://")) return fileURLToPath(path)
+  if (path.startsWith("file://")) return fileUrlPath(path)
   return path
+}
+
+// pi's own conversion throws on the same URL, so the tool cannot open it;
+// the raw spelling keeps the gate from throwing first with a cryptic error.
+function fileUrlPath(url: string): string {
+  try {
+    return fileURLToPath(url)
+  } catch {
+    return url
+  }
 }
 
 export default function guardrailsMd(api: ExtensionAPI) {

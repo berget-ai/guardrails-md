@@ -1,6 +1,6 @@
 {
   "name": "guardrails-md",
-  "description": "guardrails.md gate for Claude Code: a System One decision model judges every Bash command before it runs",
+  "description": "GUARDRAILS.md gate for Claude Code: a System One decision model judges every Bash command before it runs",
   "owner": { "name": "Berget AI" },
   "plugins": [{ "name": "guardrails-md", "source": "./" }]
 }

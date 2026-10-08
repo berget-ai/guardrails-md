@@ -263,6 +263,12 @@ describe("pi adapter: protected paths", () => {
     expect(result?.reason).toContain("protected file — GUARDRAILS.md")
   })
 
+  it("Given a write to a file:// URL that cannot be converted, When it is called, Then the gate does not throw", async () => {
+    const handler = await loadHandler()
+    await expect(handler(writeCall("file://host/GUARDRAILS.md"), ctx)).resolves.toBeUndefined()
+    await expect(handler(writeCall("file:///a%2fGUARDRAILS.md"), ctx)).resolves.toBeUndefined()
+  })
+
   it("Given an edit on a plain source file, When it is called, Then it passes and the human is not warned", async () => {
     const handler = await loadHandler()
     await expect(handler(editCall(join(dir, "src", "a.ts")), ctx)).resolves.toBeUndefined()
