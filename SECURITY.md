@@ -12,7 +12,8 @@ We aim to acknowledge reports within two business days.
 
 - The gate code in this repository (core.ts and the opencode and pi adapters
   in adapters/, and the Claude Code hooks module in hooks/register.ts).
-- The published npm package `@bergetai/opencode-guardrails-md`.
+- The published npm package `@bergetai/guardrails-md` (formerly
+  `@bergetai/opencode-guardrails-md`).
 
 ## Known limitations (by design, documented in the README)
 
