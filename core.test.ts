@@ -19,7 +19,7 @@ function harness(): Harness {
   return {
     name: "opencode",
     authPath: join(home, "auth.json"),
-    guardrailPaths: ["guardrails.md", ".opencode/guardrails.md"],
+    guardrailPaths: ["GUARDRAILS.md", ".opencode/GUARDRAILS.md", "guardrails.md", ".opencode/guardrails.md"],
     logPath: join(home, ".cache", "opencode", "systemone-gate.log"),
   }
 }
@@ -28,8 +28,9 @@ function seedAuth(auth: unknown) {
   writeFileSync(join(home, "auth.json"), JSON.stringify(auth))
 }
 
-function seedGuardrails(text: string, sub = false) {
-  const p = sub ? join(dir, ".opencode", "guardrails.md") : join(dir, "guardrails.md")
+function seedGuardrails(text: string, sub = false, upper = false) {
+  const name = upper ? "GUARDRAILS.md" : "guardrails.md"
+  const p = sub ? join(dir, ".opencode", name) : join(dir, name)
   mkdirSync(p.replace(/\/[^/]+$/, ""), { recursive: true })
   writeFileSync(p, text)
 }
@@ -75,11 +76,19 @@ describe("protectedPath", () => {
     writeFileSync(p, "content")
   }
 
-  it("Given a relative path to guardrails.md, When checked, Then it is protected", async () => {
-    write(join(dir, "guardrails.md"))
+  it("Given a relative path to GUARDRAILS.md, When checked, Then it is protected", async () => {
+    write(join(dir, "GUARDRAILS.md"))
     const { protectedPath } = await loadCore()
-    expect(protectedPath(dir, "guardrails.md")).toBe("guardrails.md")
-    expect(protectedPath(dir, join(dir, "guardrails.md"))).toBe("guardrails.md")
+    expect(protectedPath(dir, "GUARDRAILS.md")).toBe("GUARDRAILS.md")
+    expect(protectedPath(dir, join(dir, "GUARDRAILS.md"))).toBe("GUARDRAILS.md")
+  })
+
+  it("Given any capitalisation variant of the file, When checked, Then it is still protected", async () => {
+    write(join(dir, "GuardRails.md"))
+    const { protectedPath } = await loadCore()
+    expect(protectedPath(dir, "GuardRails.md")).toBe("GUARDRAILS.md")
+    expect(protectedPath(dir, "guardrails.md")).toBe("GUARDRAILS.md")
+    expect(protectedPath(dir, join(dir, ".PI", "GUARDRAILS.MD"))).toBe(".pi/GUARDRAILS.md")
   })
 
   it("Given an absolute path under .github/workflows/, When checked, Then the directory entry protects it", async () => {
@@ -89,10 +98,10 @@ describe("protectedPath", () => {
   })
 
   it("Given a symlink to guardrails.md under another name, When checked, Then it is protected", async () => {
-    write(join(dir, "guardrails.md"))
-    symlinkSync("guardrails.md", join(dir, "notes.md"))
+    write(join(dir, "GUARDRAILS.md"))
+    symlinkSync("GUARDRAILS.md", join(dir, "notes.md"))
     const { protectedPath } = await loadCore()
-    expect(protectedPath(dir, join(dir, "notes.md"))).toBe("guardrails.md")
+    expect(protectedPath(dir, join(dir, "notes.md"))).toBe("GUARDRAILS.md")
   })
 
   it("Given a not-yet-existing file under a symlinked .pi/, When checked, Then it is protected", async () => {
@@ -111,7 +120,7 @@ describe("protectedPath", () => {
   it("Given a protected file spelled in another case, When checked, Then it is protected", async () => {
     write(join(dir, "guardrails.md"))
     const { protectedPath } = await loadCore()
-    expect(protectedPath(dir, "Guardrails.MD")).toBe("guardrails.md")
+    expect(protectedPath(dir, "Guardrails.MD")).toBe("GUARDRAILS.md")
     expect(protectedPath(dir, join(dir, ".Claude", "Settings.json"))).toBe(".claude/settings.json")
   })
 
@@ -129,13 +138,18 @@ describe("protectedPath", () => {
 })
 
 describe("checkPath", () => {
-  it("Given a write to guardrails.md, When checked, Then the reason names the file and tells the human", async () => {
+  it("Given a write to GUARDRAILS.md, When checked, Then the reason names the file and tells the human", async () => {
     const gate = await makeGate()
-    expect(gate.checkPath(join(dir, "guardrails.md"))).toMatchObject({
+    expect(gate.checkPath(join(dir, "GUARDRAILS.md"))).toMatchObject({
       reason: expect.stringMatching(
-        /protected file — guardrails\.md[\s\S]*edited by your human, not the agent[\s\S]*Ask them to make the change and restart opencode/,
+        /protected file — GUARDRAILS\.md[\s\S]*edited by your human, not the agent[\s\S]*Ask them to make the change and restart opencode/,
       ),
     })
+  })
+
+  it("Given a write to the legacy lowercase guardrails.md, When checked, Then it is refused under the canonical name", async () => {
+    const gate = await makeGate()
+    expect(gate.checkPath(join(dir, "guardrails.md"))?.reason).toContain("protected file — GUARDRAILS.md")
   })
 
   it("Given a write under .pi/, When checked, Then the directory entry is named", async () => {
@@ -159,6 +173,16 @@ describe("checkPath", () => {
   it("Given an empty path, When checked, Then nothing is protected", async () => {
     const gate = await makeGate()
     expect(gate.checkPath("")).toBeNull()
+  })
+
+  it("Given a project opened through a link and .pi linked elsewhere, When a write targets LINK/.pi/x.ts, Then it is protected", async () => {
+    mkdirSync(join(dir, "real"))
+    mkdirSync(join(home, "pi-elsewhere"))
+    symlinkSync(join(home, "pi-elsewhere"), join(dir, "real", ".pi"))
+    symlinkSync(join(dir, "real"), join(dir, "link"))
+    const { createGate } = await loadCore()
+    const gate = createGate(harness(), join(dir, "link"))
+    expect(gate.checkPath(join(dir, "link", ".pi", "x.ts"))?.reason).toContain("protected file — .pi/")
   })
 })
 
@@ -246,7 +270,13 @@ describe("seatToken", () => {
 })
 
 describe("readGuardrails", () => {
-  const paths = ["guardrails.md", ".opencode/guardrails.md"]
+  const paths = ["GUARDRAILS.md", ".opencode/GUARDRAILS.md", "guardrails.md", ".opencode/guardrails.md"]
+  it("prefers GUARDRAILS.md over a legacy lowercase guardrails.md", async () => {
+    writeFileSync(join(dir, "GUARDRAILS.md"), "# canonical")
+    seedGuardrails("# legacy", true) // .opencode/: on a case-insensitive file system the two names share a file
+    const { readGuardrails } = await loadCore()
+    expect(readGuardrails(dir, paths)).toContain("canonical")
+  })
   it("reads guardrails.md from the repo root", async () => {
     seedGuardrails("# rules\n- no force push")
     const { readGuardrails } = await loadCore()
@@ -271,6 +301,14 @@ describe("readGuardrails", () => {
 })
 
 describe("createGate freezes guardrails", () => {
+  it("Given GUARDRAILS.md at creation, When the file is weakened later, Then checks still judge the original", async () => {
+    seedGuardrails("# original", false, true)
+    const gate = await makeGate()
+    seedGuardrails("# WEAKENED BY AGENT", false, true)
+    await gate.check("ls")
+    expect(systemOne.mock.calls[0][0].state.text).toContain("# original")
+    expect(systemOne.mock.calls[0][0].state.text).not.toContain("WEAKENED")
+  })
   it("Given guardrails.md at creation, When the file is weakened later, Then checks still judge the original", async () => {
     seedGuardrails("# original")
     const gate = await makeGate()
@@ -286,7 +324,7 @@ describe("empty guardrails.md", () => {
     seedGuardrails("")
     systemOne.mockResolvedValue(blockDestructive)
     const gate = await makeGate()
-    await expect(gate.check("rm -rf /data")).resolves.toMatchObject({ reason: expect.stringMatching(/No guardrails\.md found/) })
+    await expect(gate.check("rm -rf /data")).resolves.toMatchObject({ reason: expect.stringMatching(/No GUARDRAILS\.md found/) })
   })
 })
 
@@ -377,7 +415,7 @@ describe("startup warnings: truncated guardrails.md", () => {
   it("Given guardrails.md over 2000 characters, When the gate is created, Then it warns that later rules are ignored", async () => {
     seedGuardrails("x".repeat(3000))
     const gate = await makeGate()
-    expect(gate.warnings).toEqual([expect.stringMatching(/guardrails\.md.*2000 characters.*ignored/)])
+    expect(gate.warnings).toEqual([expect.stringMatching(/GUARDRAILS\.md.*2000 characters.*ignored/)])
   })
 
   it("Given a truncated guardrails.md, When a command is blocked, Then the reason carries the truncation warning", async () => {
@@ -398,7 +436,7 @@ describe("check: blocking", () => {
   it("blocks above threshold with kind, scores and human-only override", async () => {
     systemOne.mockResolvedValue(blockDestructive)
     const gate = await makeGate()
-    await expect(gate.check("rm -rf /data")).resolves.toMatchObject({ reason: expect.stringMatching(/destructive=0\.98.*named exceptions in\s+guardrails\.md do not override.*No guardrails\.md found.*Your human can create one/s) })
+    await expect(gate.check("rm -rf /data")).resolves.toMatchObject({ reason: expect.stringMatching(/destructive=0\.98.*named exceptions in\s+GUARDRAILS\.md do not override.*No GUARDRAILS\.md found.*Your human can create one/s) })
   })
   it("the policy-violation message addresses the human and forbids agent edits", async () => {
     seedGuardrails("# rules\n## The agent MUST NOT\n- install packages globally")
@@ -406,7 +444,7 @@ describe("check: blocking", () => {
       answers: { destructive: { noul: 0.01 }, credentials: { noul: 0 }, guardrails_violation: { noul: 0.9 }, policy_exception: { noul: 0.1 } },
     })
     const gate = await makeGate()
-    await expect(gate.check("npm install -g typescript")).resolves.toMatchObject({ reason: expect.stringMatching(/your human can name the command in the\s+MAY section of guardrails\.md and restart opencode/s) })
+    await expect(gate.check("npm install -g typescript")).resolves.toMatchObject({ reason: expect.stringMatching(/your human can name the command in the\s+MAY section of GUARDRAILS\.md and restart opencode/s) })
   })
 
   it("picks the worst dimension for the message", async () => {
@@ -515,7 +553,7 @@ describe("check: named exceptions in guardrails", () => {
       withGuardrails({ destructive: { noul: 0.97 }, credentials: { noul: 0 }, guardrails_violation: { noul: 0.05 }, policy_exception: { noul: 0.93 } }),
     )
     const gate = await makeGate()
-    await expect(gate.check("dropdb staging")).resolves.toMatchObject({ reason: expect.stringMatching(/named exceptions in\s+guardrails\.md do not override this/) })
+    await expect(gate.check("dropdb staging")).resolves.toMatchObject({ reason: expect.stringMatching(/named exceptions in\s+GUARDRAILS\.md do not override this/) })
   })
 
   it("a named exception DOES override a policy violation (false-positive fix)", async () => {
@@ -533,7 +571,7 @@ describe("check: named exceptions in guardrails", () => {
       withGuardrails({ destructive: { noul: 0.97 }, credentials: { noul: 0 }, guardrails_violation: { noul: 0.2 }, policy_exception: { noul: 0.3 } }),
     )
     const gate = await makeGate()
-    await expect(gate.check("rm -rf /var/lib/postgresql")).resolves.toMatchObject({ reason: expect.stringMatching(/named exceptions in\s+guardrails\.md do not override this/) })
+    await expect(gate.check("rm -rf /var/lib/postgresql")).resolves.toMatchObject({ reason: expect.stringMatching(/named exceptions in\s+GUARDRAILS\.md do not override this/) })
   })
 
   it("without guardrails there is no exception path", async () => {

@@ -4,16 +4,20 @@
  * edits and writes to protected paths (edit/write): no model call, no
  * threshold, no cooldown. A block returns { block, reason } to the agent and
  * warns the human. Without a credential the gate is inactive, and the human
- * is told once. Config warnings (bad threshold, truncated guardrails.md) are
+ * is told once. Config warnings (bad threshold, truncated GUARDRAILS.md) are
  * shown when a session starts.
  *
  * Credentials: pi's own resolution for the "berget" provider first (OAuth or
  * API-key login), then the berget OAuth entry in pi's auth.json
  * ($PI_CODING_AGENT_DIR or ~/.pi/agent), then the env keys core reads.
- * Guardrails: guardrails.md or .pi/guardrails.md, frozen at extension load.
+ * Guardrails: GUARDRAILS.md or .pi/GUARDRAILS.md (legacy lowercase names are
+ * still read), frozen at extension load.
  * Log: ~/.cache/pi/systemone-gate.log (SYSTEMONE_LOG=1).
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { createGate, type Harness } from "../core.ts"
 
 const BERGET_PROVIDER = "berget"
@@ -23,7 +27,7 @@ function pi(): Harness {
   return {
     name: "pi",
     authPath: `${process.env.PI_CODING_AGENT_DIR ?? `${home}/.pi/agent`}/auth.json`,
-    guardrailPaths: ["guardrails.md", ".pi/guardrails.md"],
+    guardrailPaths: ["GUARDRAILS.md", ".pi/GUARDRAILS.md", "guardrails.md", ".pi/guardrails.md"],
     logPath: `${home}/.cache/pi/systemone-gate.log`,
   }
 }
@@ -32,6 +36,27 @@ function pi(): Harness {
 function warn(ctx: ExtensionContext, message: string): void {
   if (ctx.hasUI) ctx.ui.notify(message, "warning")
   else process.stderr.write(`${message}\n`)
+}
+
+// The file pi's edit/write tools actually open: they strip a leading `@`,
+// expand `~`, and accept file:// URLs (resolvePath in pi's utils/paths.js).
+// Checking the raw spelling would let `@GUARDRAILS.md` past the list.
+function piPath(raw: string): string {
+  const path = raw.startsWith("@") ? raw.slice(1) : raw
+  if (path === "~") return homedir()
+  if (path.startsWith("~/")) return join(homedir(), path.slice(2))
+  if (path.startsWith("file://")) return fileUrlPath(path)
+  return path
+}
+
+// pi's own conversion throws on the same URL, so the tool cannot open it;
+// the raw spelling keeps the gate from throwing first with a cryptic error.
+function fileUrlPath(url: string): string {
+  try {
+    return fileURLToPath(url)
+  } catch {
+    return url
+  }
 }
 
 export default function guardrailsMd(api: ExtensionAPI) {
@@ -46,7 +71,7 @@ export default function guardrailsMd(api: ExtensionAPI) {
 
   api.on("tool_call", async (event, ctx) => {
     if (event.toolName === "edit" || event.toolName === "write") {
-      const pathBlock = gate.checkPath(String(event.input.path ?? ""))
+      const pathBlock = gate.checkPath(piPath(String(event.input.path ?? "")))
       if (!pathBlock) return
       warn(ctx, pathBlock.reason.split("\n")[0])
       return { block: true, reason: pathBlock.reason }

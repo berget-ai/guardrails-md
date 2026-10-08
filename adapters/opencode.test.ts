@@ -92,6 +92,13 @@ describe("opencode adapter", () => {
     await expect(loadHook()).resolves.toBeTypeOf("function")
   })
 
+  it("Given GUARDRAILS.md, When bash runs, Then the canonical policy is judged", async () => {
+    writeFileSync(join(dir, "GUARDRAILS.md"), "# canonical rules")
+    const hook = await loadHook()
+    await hook({ tool: "bash" }, { args: { command: "ls" } })
+    expect(systemOne.mock.calls[0][0].state.text).toContain("# canonical rules")
+  })
+
   it("Given .opencode/guardrails.md, When bash runs, Then the policy is judged", async () => {
     mkdirSync(join(dir, ".opencode"), { recursive: true })
     writeFileSync(join(dir, ".opencode", "guardrails.md"), "# opencode rules")
@@ -105,7 +112,7 @@ describe("opencode adapter: protected paths", () => {
   it("Given an edit on guardrails.md, When the hook runs, Then it throws with the reason and the model is not asked", async () => {
     const hook = await loadHook()
     await expect(hook({ tool: "edit" }, { args: { filePath: join(dir, "guardrails.md") } })).rejects.toThrow(
-      /protected file — guardrails\.md[\s\S]*restart opencode/,
+      /protected file — GUARDRAILS\.md[\s\S]*restart opencode/,
     )
     expect(systemOne).not.toHaveBeenCalled()
   })
@@ -121,7 +128,7 @@ describe("opencode adapter: protected paths", () => {
   it("Given apply_patch touching guardrails.md, When the hook runs, Then it throws and the model is not asked", async () => {
     const hook = await loadHook()
     const patchText = `*** Begin Patch\n*** Update File: ${join(dir, "guardrails.md")}\n@@\n@@\n*** End Patch`
-    await expect(hook({ tool: "apply_patch" }, { args: { patchText } })).rejects.toThrow(/protected file — guardrails\.md/)
+    await expect(hook({ tool: "apply_patch" }, { args: { patchText } })).rejects.toThrow(/protected file — GUARDRAILS\.md/)
     expect(systemOne).not.toHaveBeenCalled()
   })
 
@@ -130,6 +137,14 @@ describe("opencode adapter: protected paths", () => {
     const patchText =
       `*** Begin Patch\n*** Delete File: ${join(dir, "opencode.json")}\n*** Add File: ${join(dir, "src", "new.ts")}\n+export {}\n*** End Patch`
     await expect(hook({ tool: "apply_patch" }, { args: { patchText } })).rejects.toThrow(/protected file — opencode\.json/)
+  })
+
+  it("Given an edit on a capitalisation variant, When the hook runs, Then it is still refused as GUARDRAILS.md", async () => {
+    const hook = await loadHook()
+    await expect(hook({ tool: "edit" }, { args: { filePath: join(dir, "GuardRails.md") } })).rejects.toThrow(
+      /protected file — GUARDRAILS\.md/,
+    )
+    expect(systemOne).not.toHaveBeenCalled()
   })
 
   it("Given an edit on a plain source file, When the hook runs, Then it passes and the model is not asked", async () => {

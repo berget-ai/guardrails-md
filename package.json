@@ -1,7 +1,7 @@
 {
   "name": "@bergetai/opencode-guardrails-md",
   "version": "0.7.0",
-  "description": "guardrails.md gate for opencode, pi and Claude Code (hooks module): a System One decision model (TypeSafe Jev) judges every bash command before it runs — destructive / credentials / guardrails.md policy",
+  "description": "GUARDRAILS.md gate for opencode, pi and Claude Code (hooks module): a System One decision model (TypeSafe Jev) judges every bash command before it runs — destructive / credentials / GUARDRAILS.md policy",
   "type": "module",
   "exports": {
     ".": "./adapters/opencode.ts",

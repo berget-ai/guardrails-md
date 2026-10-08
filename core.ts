@@ -4,7 +4,7 @@
  * @typesafe-ai/sdk client. Harness-free: adapters/ wires it into opencode
  * and pi, each passing a Harness with its own paths and wording.
  *
- * Flow: createGate() freezes guardrails.md → check(command) answers all
+ * Flow: createGate() freezes GUARDRAILS.md → check(command) answers all
  * questions in one forward pass (~100 ms) → a reason above threshold, else
  * null. checkPath(path) is the deterministic backstop in front of that:
  * writes to protected paths (the policy, the harness config, CI workflows)
@@ -14,7 +14,7 @@
  * Questions (noul, 0..1):
  *   destructive          — deletes/destroys data, databases, clusters, infra?
  *   credentials          — contains/leaks secrets, keys, tokens?
- *   guardrails_violation — violates the team's guardrails.md? (if present)
+ *   guardrails_violation — violates the team's GUARDRAILS.md? (if present)
  *
  * Credentials, in order: the harness's Berget seat token, then
  * BERGET_API_KEY, then the SDK's TYPESAFE_API_KEY. Endpoints: defaults to
@@ -92,13 +92,15 @@ type Verdict = {
 // harness configuration are refused in every harness, without a verdict,
 // without a threshold and without the cooldown. The list is relative to the
 // project root; an entry ending in `/` protects everything below it. No globs:
-// an agent cannot smuggle a path past a pattern it can spell.
+// an agent cannot smuggle a path past a pattern it can spell. Matching folds
+// case: macOS and Windows resolve GUARDRAILS.md and guardrails.md to the same
+// file, and on Linux no capitalisation variant may slip past the same rule.
 export const PROTECTED_PATHS = Object.freeze([
-  "guardrails.md",
-  ".agents/guardrails.md",
-  ".opencode/guardrails.md",
-  ".pi/guardrails.md",
-  ".claude/guardrails.md",
+  "GUARDRAILS.md",
+  ".agents/GUARDRAILS.md",
+  ".opencode/GUARDRAILS.md",
+  ".pi/GUARDRAILS.md",
+  ".claude/GUARDRAILS.md",
   "opencode.json",
   "opencode.jsonc",
   ".opencode/",
@@ -165,15 +167,16 @@ export function protectedPath(root: string, candidate: string): string | null {
   const rootReal = realpathSync(root)
   const absolute = isAbsolute(candidate) ? foldPath(candidate) : foldPath(join(root, candidate))
   // Case-folded: on a case-insensitive filesystem (macOS, Windows defaults)
-  // `Guardrails.MD` opens guardrails.md. Every entry is lowercase; refusing a
-  // distinct-case file on Linux is the safe side of a denylist.
+  // `Guardrails.MD` opens GUARDRAILS.md; refusing a distinct-case file on
+  // Linux is the safe side of a denylist.
   const hit = (spelled: string | null): string | null => {
     if (spelled === null) return null
     const rel = spelled.toLowerCase()
     for (const entry of PROTECTED_PATHS) {
-      if (entry.endsWith("/")) {
-        if (rel.startsWith(entry)) return entry
-      } else if (rel === entry) {
+      const pattern = entry.toLowerCase()
+      if (pattern.endsWith("/")) {
+        if (rel.startsWith(pattern)) return entry
+      } else if (rel === pattern) {
         return entry
       }
     }
@@ -183,11 +186,13 @@ export function protectedPath(root: string, candidate: string): string | null {
   return hit(relUnder(root, absolute)) ?? hit(placed === null ? null : relUnder(rootReal, placed))
 }
 
-// --- guardrails.md ----------------------------------------------------------
+// --- GUARDRAILS.md ----------------------------------------------------------
 // createGate reads this ONCE, not per command. Hot-reloading would let the
 // agent weaken its own rules mid-session via the (ungated) edit tools — the
 // same self-approval hole as the removed allow-file. Humans edit
-// guardrails.md and restart the harness; the change goes through repo review.
+// GUARDRAILS.md and restart the harness; the change goes through repo review.
+// Each harness lists the capitalised name first and the lowercase legacy
+// name after it, so older repos keep working unchanged.
 export function readGuardrails(directory: string, paths: string[]): string | null {
   for (const p of paths) {
     try {
@@ -374,10 +379,10 @@ function endpointReason(status: number | undefined): string {
   return "endpoint unreachable"
 }
 
-// Two tiers. A named exception in guardrails.md overrides the POLICY
+// Two tiers. A named exception in GUARDRAILS.md overrides the POLICY
 // question (guardrails_violation) — that is how policy false positives are
 // fixed. It does NOT override destructive or credentials: those judge the
-// command's nature, they are the backstop, and guardrails.md is
+// command's nature, they are the backstop, and GUARDRAILS.md is
 // agent-editable between sessions. A command the model judges destructive
 // needs a human at the keyboard, whatever the file says.
 type Dimension = "destructive" | "credentials" | "guardrails_violation"
@@ -415,16 +420,17 @@ function blockMessage(outcome: Outcome, hasGuardrails: boolean, harness: string)
   const perKind =
     outcome.kind === "guardrails_violation"
       ? `\n  If this is a false positive, your human can name the command in the` +
-        `\n  MAY section of guardrails.md and restart ${harness} — the gate` +
+        `\n  MAY section of GUARDRAILS.md and restart ${harness} — the gate` +
         `\n  follows the file.`
       : `\n  Judged destructive/leaking on its own merits — named exceptions in` +
-        `\n  guardrails.md do not override this. If it is intended, your human` +
+        `\n  GUARDRAILS.md do not override this. If it is intended, your human` +
         `\n  can run it directly, or restart ${harness} with SYSTEMONE_GATE=off` +
         `\n  for a session that needs it.`
   const bootstrap = hasGuardrails
     ? ""
-    : `\n  No guardrails.md found in this repo. Your human can create one` +
-      `\n  and write what the agent may and may not do — name what should` +
+    : `\n  No GUARDRAILS.md found in this repo. Your human can create one` +
+      `\n  (legacy lowercase guardrails.md is still read) and write what the` +
+      `\n  agent may and may not do — name what should` +
       `\n  pass in the MAY section, then restart ${harness}.`
   return (
     `SystemOne-gate: blocked command — ${outcome.kind}=${outcome.worst.toFixed(2)} > ${THRESHOLD}\n` +
@@ -434,9 +440,8 @@ function blockMessage(outcome: Outcome, hasGuardrails: boolean, harness: string)
 }
 
 export function createGate(harness: Harness, directory: string) {
-  const root = realpathSync(directory)
   // Freeze guardrails NOW, before any command is judged. A lazy first-read
-  // would let an agent weaken guardrails.md via the ungated edit tools
+  // would let an agent weaken GUARDRAILS.md via the ungated edit tools
   // before issuing its first bash command and rule the whole session under
   // its own rules.
   const guardrails = readGuardrails(directory, harness.guardrailPaths)
@@ -446,7 +451,7 @@ export function createGate(harness: Harness, directory: string) {
   const warnings = [
     threshold.warning,
     guardrails?.endsWith(TRUNCATED)
-      ? `SystemOne-gate: guardrails.md is longer than ${GUARDRAILS_MAX} characters — rules after that are ignored. ` +
+      ? `SystemOne-gate: GUARDRAILS.md is longer than ${GUARDRAILS_MAX} characters — rules after that are ignored. ` +
         `Shorten it or put the MUST NOT rules first.`
       : undefined,
   ].filter((w): w is string => w !== undefined)
@@ -512,7 +517,7 @@ export function createGate(harness: Harness, directory: string) {
     // kind of seam an agent learns to exploit, and an override file the
     // agent can write is self-approval. Overrides belong to the human,
     // outside the agent's reach: SYSTEMONE_GATE / SYSTEMONE_THRESHOLD /
-    // guardrails.md, all set before or around the session.
+    // GUARDRAILS.md, all set before or around the session.
 
     let verdict: Verdict
     try {
@@ -551,7 +556,7 @@ export function createGate(harness: Harness, directory: string) {
   // it simply never gets to write the file. Honours SYSTEMONE_GATE=off.
   function checkPath(path: string): Block | null {
     if (process.env.SYSTEMONE_GATE === "off") return null
-    const hit = protectedPath(root, path)
+    const hit = protectedPath(directory, path)
     if (!hit) return null
     const reason =
       `SystemOne-gate: protected file — ${hit}\n` +
