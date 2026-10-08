@@ -160,6 +160,16 @@ describe("checkPath", () => {
     const gate = await makeGate()
     expect(gate.checkPath("")).toBeNull()
   })
+
+  it("Given a project opened through a link and .pi linked elsewhere, When a write targets LINK/.pi/x.ts, Then it is protected", async () => {
+    mkdirSync(join(dir, "real"))
+    mkdirSync(join(home, "pi-elsewhere"))
+    symlinkSync(join(home, "pi-elsewhere"), join(dir, "real", ".pi"))
+    symlinkSync(join(dir, "real"), join(dir, "link"))
+    const { createGate } = await loadCore()
+    const gate = createGate(harness(), join(dir, "link"))
+    expect(gate.checkPath(join(dir, "link", ".pi", "x.ts"))?.reason).toContain("protected file — .pi/")
+  })
 })
 
 describe("checkPath does not feed the cooldown", () => {

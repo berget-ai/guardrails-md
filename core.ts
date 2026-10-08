@@ -434,7 +434,6 @@ function blockMessage(outcome: Outcome, hasGuardrails: boolean, harness: string)
 }
 
 export function createGate(harness: Harness, directory: string) {
-  const root = realpathSync(directory)
   // Freeze guardrails NOW, before any command is judged. A lazy first-read
   // would let an agent weaken guardrails.md via the ungated edit tools
   // before issuing its first bash command and rule the whole session under
@@ -551,7 +550,7 @@ export function createGate(harness: Harness, directory: string) {
   // it simply never gets to write the file. Honours SYSTEMONE_GATE=off.
   function checkPath(path: string): Block | null {
     if (process.env.SYSTEMONE_GATE === "off") return null
-    const hit = protectedPath(root, path)
+    const hit = protectedPath(directory, path)
     if (!hit) return null
     const reason =
       `SystemOne-gate: protected file — ${hit}\n` +

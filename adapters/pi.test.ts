@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
+import { pathToFileURL } from "node:url"
 
 const sdk = await vi.hoisted(async () => (await import("../test/sdk-mock.ts")).createSdkMock())
 vi.mock("@typesafe-ai/sdk", () => sdk.module)
@@ -234,6 +235,25 @@ describe("pi adapter: protected paths", () => {
     expect(result?.block).toBe(true)
     expect(result?.reason).toContain("protected file — .pi/")
     expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given an edit on @guardrails.md, When pi strips the @ prefix, Then it is blocked", async () => {
+    const handler = await loadHandler()
+    const result = await handler(editCall("@guardrails.md"), ctx)
+    expect(result?.reason).toContain("protected file — guardrails.md")
+  })
+
+  it("Given a write to ~/<project>/guardrails.md, When pi expands the tilde, Then it is blocked", async () => {
+    vi.stubEnv("HOME", dirname(dir))
+    const handler = await loadHandler()
+    const result = await handler(writeCall(`~/${basename(dir)}/guardrails.md`), ctx)
+    expect(result?.reason).toContain("protected file — guardrails.md")
+  })
+
+  it("Given a write to a file:// URL of guardrails.md, When pi converts the URL, Then it is blocked", async () => {
+    const handler = await loadHandler()
+    const result = await handler(writeCall(pathToFileURL(join(dir, "guardrails.md")).href), ctx)
+    expect(result?.reason).toContain("protected file — guardrails.md")
   })
 
   it("Given an edit on a plain source file, When it is called, Then it passes and the human is not warned", async () => {
