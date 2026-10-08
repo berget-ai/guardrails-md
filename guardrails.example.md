@@ -2,7 +2,7 @@
 
 ## The agent MUST NOT
 
-- Edit this file (guardrails.md) itself — it is written and changed by humans, through review.
+- Edit this file (GUARDRAILS.md) itself — it is written and changed by humans, through review.
 - Change anything in production — production changes reach production only through Git/CD.
 - Push directly to the main branch — all changes go through pull request.
 - Install software outside the project's declared dependencies.

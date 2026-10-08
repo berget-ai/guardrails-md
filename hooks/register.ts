@@ -5,7 +5,8 @@
  * the SDK). The questions, decision, block wording and cooldown below are
  * the same as core.ts's; keep the two in step when editing either.
  *
- * session.start snapshots guardrails.md (then .claude/guardrails.md), the
+ * session.start snapshots GUARDRAILS.md (then .claude/GUARDRAILS.md, then the
+ * legacy lowercase files), the
  * session root and every variable below; it fires once per session and not
  * on compaction, and a missing snapshot denies. tool.call judges Bash, and
  * Monitor when it runs a shell `command`, and deterministically refuses
@@ -24,15 +25,16 @@
 import type { Register } from "claude-code"
 
 const HARNESS = "claude"
-const GUARDRAIL_PATHS = ["guardrails.md", ".claude/guardrails.md"]
+// Capitalised canonical names first; the lowercase legacy files are the fallback.
+const GUARDRAIL_PATHS = ["GUARDRAILS.md", ".claude/GUARDRAILS.md", "guardrails.md", ".claude/guardrails.md"]
 // The same list as core.ts's PROTECTED_PATHS — a hooks module cannot import
 // it, so keep the two in step.
 const PROTECTED_PATHS = [
-  "guardrails.md",
-  ".agents/guardrails.md",
-  ".opencode/guardrails.md",
-  ".pi/guardrails.md",
-  ".claude/guardrails.md",
+  "GUARDRAILS.md",
+  ".agents/GUARDRAILS.md",
+  ".opencode/GUARDRAILS.md",
+  ".pi/GUARDRAILS.md",
+  ".claude/GUARDRAILS.md",
   "opencode.json",
   "opencode.jsonc",
   ".opencode/",
@@ -74,7 +76,7 @@ function gatewayRoot(url: string): string {
   return url.replace(/\/v1\/systemone\/?$/, "").replace(/\/+$/, "")
 }
 
-// --- guardrails.md ----------------------------------------------------------
+// --- GUARDRAILS.md ----------------------------------------------------------
 
 function truncateGuardrails(raw: string): string {
   const text = raw.trim()
@@ -86,7 +88,7 @@ function truncateGuardrails(raw: string): string {
 function truncationWarning(guardrails: string | null): string | undefined {
   if (!guardrails?.endsWith(TRUNCATED)) return undefined
   return (
-    `SystemOne-gate: guardrails.md is longer than ${GUARDRAILS_MAX} characters — rules after that are ignored. ` +
+    `SystemOne-gate: GUARDRAILS.md is longer than ${GUARDRAILS_MAX} characters — rules after that are ignored. ` +
     `Shorten it or put the MUST NOT rules first.`
   )
 }
@@ -178,10 +180,10 @@ function verdictFrom(answers: unknown): Verdict {
   }
 }
 
-// Two tiers. A named exception in guardrails.md overrides the POLICY
+// Two tiers. A named exception in GUARDRAILS.md overrides the POLICY
 // question (guardrails_violation) — that is how policy false positives are
 // fixed. It does NOT override destructive or credentials: those judge the
-// command's nature, they are the backstop, and guardrails.md is
+// command's nature, they are the backstop, and GUARDRAILS.md is
 // agent-editable between sessions. A command the model judges destructive
 // needs a human at the keyboard, whatever the file says.
 type Dimension = "destructive" | "credentials" | "guardrails_violation"
@@ -219,16 +221,17 @@ function blockMessage(outcome: Outcome, hasGuardrails: boolean, threshold: numbe
   const perKind =
     outcome.kind === "guardrails_violation"
       ? `\n  If this is a false positive, your human can name the command in the` +
-        `\n  MAY section of guardrails.md and restart ${HARNESS} — the gate` +
+        `\n  MAY section of GUARDRAILS.md and restart ${HARNESS} — the gate` +
         `\n  follows the file.`
       : `\n  Judged destructive/leaking on its own merits — named exceptions in` +
-        `\n  guardrails.md do not override this. If it is intended, your human` +
+        `\n  GUARDRAILS.md do not override this. If it is intended, your human` +
         `\n  can run it directly, or restart ${HARNESS} with SYSTEMONE_GATE=off` +
         `\n  for a session that needs it.`
   const bootstrap = hasGuardrails
     ? ""
-    : `\n  No guardrails.md found in this repo. Your human can create one` +
-      `\n  and write what the agent may and may not do — name what should` +
+    : `\n  No GUARDRAILS.md found in this repo. Your human can create one` +
+      `\n  (legacy lowercase guardrails.md is still read) and write what the` +
+      `\n  agent may and may not do — name what should` +
       `\n  pass in the MAY section, then restart ${HARNESS}.`
   return (
     `SystemOne-gate: blocked command — ${outcome.kind}=${outcome.worst.toFixed(2)} > ${threshold}\n` +
@@ -358,9 +361,10 @@ function protectedPath(root: string, resolved: string): string | null {
   const rel = relUnder(root, resolved)?.toLowerCase() ?? null
   if (rel === null) return null
   for (const entry of PROTECTED_PATHS) {
-    if (entry.endsWith("/")) {
-      if (rel.startsWith(entry)) return entry
-    } else if (rel === entry) {
+    const pattern = entry.toLowerCase()
+    if (pattern.endsWith("/")) {
+      if (rel.startsWith(pattern)) return entry
+    } else if (rel === pattern) {
       return entry
     }
   }

@@ -22,7 +22,7 @@ find a way to break the stated guarantees, we want to hear about it:
 - The gate judges bash commands only; other tool calls pass through, except
   that the file-editing tools refuse writes to protected paths in every
   harness (see the protected list in the README). A bash write such as
-  `echo >> guardrails.md` is not matched against the list — it is judged by
+  `echo >> GUARDRAILS.md` is not matched against the list — it is judged by
   the model, not by the list. In pi, the
   `powershell` tool is not gated; in Claude Code, `Bash` and `Monitor`'s
   shell `command` are gated and `PowerShell` is not.
@@ -32,7 +32,7 @@ find a way to break the stated guarantees, we want to hear about it:
 - Claude Code hooks modules are an early-access API. The module fails
   closed through its `.catch` handler; an engine change that bypassed
   module hooks entirely would leave Bash ungated.
-- `guardrails.md` is read once at session start but lives in the repo —
+- `GUARDRAILS.md` is read once at session start but lives in the repo —
   the edit tools refuse to touch it and the other protected paths, and the
   running session judges under the frozen copy, but a bash write can still
   weaken the rules for the next session, including by padding the file so

@@ -90,6 +90,20 @@ describe("guardrails-md mod", () => {
     expect(body.questions.destructive.type).toBe("noul")
   })
 
+  test("Given a canonical GUARDRAILS.md, When Bash runs, Then the policy is judged", async ($, on) => {
+    const w = world(on, { files: { [`${CWD}/GUARDRAILS.md`]: POLICY } })
+    await start($)
+    await bash($, "ls")
+    expect(JSON.parse(w.fetches[0].body).state.text).toContain(POLICY)
+  })
+
+  test("Given an Edit on a capitalisation variant, When checked, Then the call is denied", async ($, on) => {
+    world(on, { files: { [`${CWD}/GuardRails.md`]: POLICY } })
+    await start($)
+    const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/GuardRails.md`, old_string: "a", new_string: "b" })
+    expect(out.deny).toContain("SystemOne-gate: protected file — GUARDRAILS.md")
+  })
+
   test("Given a destructive verdict, When Bash runs, Then the call is denied with the reason", async ($, on) => {
     const w = world(on, { answer: () => ({ status: 200, body: destructive }) })
     await start($)
@@ -200,7 +214,7 @@ describe("guardrails-md mod", () => {
     const w = world(on, { files: { [`${CWD}/guardrails.md`]: POLICY } })
     await start($)
     const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/guardrails.md`, old_string: "a", new_string: "b" })
-    expect(out.deny).toContain(`SystemOne-gate: protected file — guardrails.md`)
+    expect(out.deny).toContain(`SystemOne-gate: protected file — GUARDRAILS.md`)
     expect(out.deny).toContain("restart claude")
     expect(w.fetches).toEqual([])
     expect(w.ran).toEqual([])
@@ -234,7 +248,7 @@ describe("guardrails-md mod", () => {
     const w = world(on, { files: { [`${CWD}/guardrails.md`]: POLICY }, links: { [`${CWD}/notes.md`]: `${CWD}/guardrails.md` } })
     await start($)
     const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/notes.md`, old_string: "a", new_string: "b" })
-    expect(out.deny).toContain("SystemOne-gate: protected file — guardrails.md")
+    expect(out.deny).toContain("SystemOne-gate: protected file — GUARDRAILS.md")
     expect(w.ran).toEqual([])
   })
 
@@ -259,7 +273,7 @@ describe("guardrails-md mod", () => {
     const w = world(on, { env: {}, files: { [`${CWD}/guardrails.md`]: POLICY } })
     await start($)
     const out = await $.tool.call({ tool: "Edit", file_path: `${CWD}/guardrails.md`, old_string: "a", new_string: "b" })
-    expect(out.deny).toContain("SystemOne-gate: protected file — guardrails.md")
+    expect(out.deny).toContain("SystemOne-gate: protected file — GUARDRAILS.md")
     expect(w.ran).toEqual([])
   })
 
@@ -267,7 +281,7 @@ describe("guardrails-md mod", () => {
     const w = world(on, { env: { BERGET_API_KEY: "k" }, files: { [`${CWD}/guardrails.md`]: POLICY } })
     await start($)
     const out = await $.tool.call({ tool: "Write", file_path: `${CWD}/Guardrails.MD`, content: "new" })
-    expect(out.deny).toContain("SystemOne-gate: protected file — guardrails.md")
+    expect(out.deny).toContain("SystemOne-gate: protected file — GUARDRAILS.md")
     expect(w.ran).toEqual([])
   })
 

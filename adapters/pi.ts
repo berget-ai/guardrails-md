@@ -4,13 +4,14 @@
  * edits and writes to protected paths (edit/write): no model call, no
  * threshold, no cooldown. A block returns { block, reason } to the agent and
  * warns the human. Without a credential the gate is inactive, and the human
- * is told once. Config warnings (bad threshold, truncated guardrails.md) are
+ * is told once. Config warnings (bad threshold, truncated GUARDRAILS.md) are
  * shown when a session starts.
  *
  * Credentials: pi's own resolution for the "berget" provider first (OAuth or
  * API-key login), then the berget OAuth entry in pi's auth.json
  * ($PI_CODING_AGENT_DIR or ~/.pi/agent), then the env keys core reads.
- * Guardrails: guardrails.md or .pi/guardrails.md, frozen at extension load.
+ * Guardrails: GUARDRAILS.md or .pi/GUARDRAILS.md (legacy lowercase names are
+ * still read), frozen at extension load.
  * Log: ~/.cache/pi/systemone-gate.log (SYSTEMONE_LOG=1).
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
@@ -26,7 +27,7 @@ function pi(): Harness {
   return {
     name: "pi",
     authPath: `${process.env.PI_CODING_AGENT_DIR ?? `${home}/.pi/agent`}/auth.json`,
-    guardrailPaths: ["guardrails.md", ".pi/guardrails.md"],
+    guardrailPaths: ["GUARDRAILS.md", ".pi/GUARDRAILS.md", "guardrails.md", ".pi/guardrails.md"],
     logPath: `${home}/.cache/pi/systemone-gate.log`,
   }
 }
