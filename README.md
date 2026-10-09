@@ -39,9 +39,10 @@ conversation that led to it.
 
 This project is unrelated to the [guardrails.md](https://guardrails.md/)
 convention, where the agent appends its own lessons to `GUARDRAILS.md`. Here
-the file is written by humans and the gate blocks the agent from editing it,
-so if your repo already follows that convention, the agent can no longer
-update the file once the gate is installed.
+the file is written by humans, so if your repo already follows that
+convention, the edit tools will refuse the agent's writes to the file once the
+gate is installed (bash writes are still judged, not hard-blocked; see
+[Protected files](#protected-files)).
 
 ## Quickstart
 
