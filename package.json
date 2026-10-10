@@ -6,6 +6,7 @@
   "exports": {
     ".": "./adapters/opencode.ts",
     "./opencode": "./adapters/opencode.ts",
+    "./server": "./adapters/opencode.ts",
     "./pi": "./adapters/pi.ts"
   },
   "files": [
