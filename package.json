@@ -1,6 +1,6 @@
 {
   "name": "guardrails-md",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "GUARDRAILS.md gate for opencode, pi and Claude Code (hooks module): a System One decision model (TypeSafe Jev) judges every bash command before it runs \u2014 destructive / credentials / GUARDRAILS.md policy",
   "type": "module",
   "exports": {
