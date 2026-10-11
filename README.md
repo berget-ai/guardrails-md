@@ -90,7 +90,7 @@ Add the plugin to `opencode.json` (global or per project):
 
 ```json
 {
-  "plugin": ["@bergetai/guardrails-md"]
+  "plugin": ["guardrails-md"]
 }
 ```
 
@@ -103,7 +103,7 @@ Install the same package from npm (add `-l` to install it for the
 current project only):
 
 ```sh
-pi install npm:@bergetai/guardrails-md
+pi install npm:guardrails-md
 ```
 
 To run pi from a clone instead, use `pi install ./` in the cloned repo after
