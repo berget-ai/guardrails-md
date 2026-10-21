@@ -14,4 +14,9 @@ describe("package metadata", () => {
     expect(pkg.name).toBe("@bergetai/guardrails-md")
     expect(pkg.keywords).toContain("pi-package")
   })
+
+  it("Given opencode loads npm plugins from exports[\"./server\"] or main, When package.json is checked, Then ./server points at the opencode adapter", () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "package.json"), "utf8"))
+    expect(pkg.exports["./server"]).toBe("./adapters/opencode.ts")
+  })
 })
