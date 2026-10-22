@@ -33,6 +33,9 @@ find a way to break the stated guarantees, we want to hear about it:
 - Claude Code hooks modules are an early-access API. The module fails
   closed through its `.catch` handler; an engine change that bypassed
   module hooks entirely would leave Bash ungated.
+- opencode 2 skips a plugin that fails to load and only writes a warning to
+  its log, so bash runs ungated. Releases without opencode 2 support fail
+  this way. `opencode plugin list` shows whether the gate is loaded.
 - `GUARDRAILS.md` is read once at session start but lives in the repo —
   the edit tools refuse to touch it and the other protected paths, and the
   running session judges under the frozen copy, but a bash write can still

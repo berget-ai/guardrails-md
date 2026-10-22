@@ -8,6 +8,7 @@ vi.mock("@typesafe-ai/sdk", () => sdk.module)
 const { systemOne } = sdk
 
 type Hook = (input: { tool: string }, output: { args: { command?: string; filePath?: string; patchText?: string } }) => Promise<void>
+type V2Hook = (event: { tool: string; input: { command?: string; path?: string; filePath?: string; patchText?: string } }) => Promise<void>
 
 const allow = { answers: { destructive: { noul: 0.01 }, credentials: { noul: 0 } } }
 const blockDestructive = { answers: { destructive: { noul: 0.98 }, credentials: { noul: 0 } } }
@@ -19,8 +20,20 @@ const showToast = vi.fn()
 
 async function loadHook(): Promise<Hook> {
   const mod = await import("./opencode.ts")
-  const hooks = await mod.default({ directory: dir, client: { tui: { showToast } } } as never)
+  const hooks = await mod.default.server({ directory: dir, client: { tui: { showToast } } } as never)
   return hooks["tool.execute.before"] as Hook
+}
+
+async function setupV2() {
+  const mod = await import("./opencode.ts")
+  const hook = vi.fn().mockResolvedValue({ dispose: async () => {} })
+  await mod.default.setup({ location: { directory: dir }, tool: { hook } } as never)
+  return hook
+}
+
+async function loadV2Hook(): Promise<V2Hook> {
+  const hook = await setupV2()
+  return hook.mock.calls[0][1] as V2Hook
 }
 
 beforeEach(() => {
@@ -45,9 +58,11 @@ afterEach(() => {
 })
 
 describe("opencode adapter", () => {
-  it("Given opencode's loader calls every export, When the module loads, Then every export is a function", async () => {
+  it("Given the opencode 1.x and 2.x loaders, When the module loads, Then the default export carries a V1 server and a V2 id and setup", async () => {
     const mod = await import("./opencode.ts")
-    for (const value of Object.values(mod)) expect(value).toBeTypeOf("function")
+    expect(mod.default.id).toBe("@bergetai/guardrails-md")
+    expect(mod.default.server).toBeTypeOf("function")
+    expect(mod.default.setup).toBeTypeOf("function")
   })
 
   it("Given a non-bash tool, When it is called, Then the model is not asked", async () => {
@@ -157,5 +172,78 @@ describe("opencode adapter: protected paths", () => {
     vi.stubEnv("SYSTEMONE_GATE", "off")
     const hook = await loadHook()
     await expect(hook({ tool: "edit" }, { args: { filePath: join(dir, "guardrails.md") } })).resolves.toBeUndefined()
+  })
+})
+
+describe("opencode 2 adapter", () => {
+  it("Given opencode 2, When setup runs, Then one execute.before tool hook is registered", async () => {
+    const hook = await setupV2()
+    expect(hook).toHaveBeenCalledTimes(1)
+    expect(hook).toHaveBeenCalledWith("execute.before", expect.any(Function))
+  })
+
+  it("Given a safe verdict, When shell runs, Then the hook resolves", async () => {
+    const hook = await loadV2Hook()
+    await expect(hook({ tool: "shell", input: { command: "ls -la" } })).resolves.toBeUndefined()
+    expect(systemOne.mock.calls[0][0].state.text).toContain("ls -la")
+  })
+
+  it("Given a destructive verdict, When shell runs, Then the hook throws with opencode wording", async () => {
+    systemOne.mockResolvedValue(blockDestructive)
+    const hook = await loadV2Hook()
+    await expect(hook({ tool: "shell", input: { command: "rm -rf /data" } })).rejects.toThrow(
+      /destructive=0\.98[\s\S]*restart opencode/,
+    )
+  })
+
+  it("Given a read tool, When it is called, Then the model is not asked", async () => {
+    const hook = await loadV2Hook()
+    await hook({ tool: "read", input: { path: join(dir, "guardrails.md") } })
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given GUARDRAILS.md in the plugin location, When shell runs, Then the policy is judged", async () => {
+    writeFileSync(join(dir, "GUARDRAILS.md"), "# v2 rules")
+    const hook = await loadV2Hook()
+    await hook({ tool: "shell", input: { command: "ls" } })
+    expect(systemOne.mock.calls[0][0].state.text).toContain("# v2 rules")
+  })
+
+  it("Given an edit on GUARDRAILS.md, When the hook runs, Then it throws and the model is not asked", async () => {
+    const hook = await loadV2Hook()
+    await expect(hook({ tool: "edit", input: { path: join(dir, "GUARDRAILS.md") } })).rejects.toThrow(
+      /protected file — GUARDRAILS\.md[\s\S]*restart opencode/,
+    )
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given a write to a relative opencode.json, When the hook runs, Then it throws", async () => {
+    const hook = await loadV2Hook()
+    await expect(hook({ tool: "write", input: { path: "opencode.json" } })).rejects.toThrow(/protected file — opencode\.json/)
+  })
+
+  it("Given a patch touching .opencode/plugins, When the hook runs, Then it throws and the model is not asked", async () => {
+    const hook = await loadV2Hook()
+    const patchText = `*** Begin Patch\n*** Add File: .opencode/plugins/x.ts\n+export {}\n*** End Patch`
+    await expect(hook({ tool: "patch", input: { patchText } })).rejects.toThrow(/protected file — \.opencode\//)
+    expect(systemOne).not.toHaveBeenCalled()
+  })
+
+  it("Given an edit whose filePath is harmless and whose path is GUARDRAILS.md, When the hook runs, Then it throws", async () => {
+    const hook = await loadV2Hook()
+    await expect(
+      hook({ tool: "edit", input: { filePath: join(dir, "src", "a.ts"), path: join(dir, "GUARDRAILS.md") } }),
+    ).rejects.toThrow(/protected file — GUARDRAILS\.md/)
+  })
+
+  it("Given a patch that moves a file onto opencode.json, When the hook runs, Then it throws", async () => {
+    const hook = await loadV2Hook()
+    const patchText = `*** Begin Patch\n*** Update File: src/a.ts\n*** Move to: opencode.json\n@@\n*** End Patch`
+    await expect(hook({ tool: "patch", input: { patchText } })).rejects.toThrow(/protected file — opencode\.json/)
+  })
+
+  it("Given an edit on a plain source file, When the hook runs, Then it passes", async () => {
+    const hook = await loadV2Hook()
+    await expect(hook({ tool: "edit", input: { path: join(dir, "src", "a.ts") } })).resolves.toBeUndefined()
   })
 })
