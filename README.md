@@ -78,8 +78,8 @@ shape:
 The gate reads the file once at session start, so restart the harness after
 editing. Only the first 2000 characters are sent to the model, so keep the
 file short and put the MUST NOT rules first. If the file is longer, the gate
-warns you at startup and in every block message, and the rules after the cut
-are not applied.
+warns you in every block message and, except on opencode 2, also at startup.
+The rules after the cut are not applied.
 See [`guardrails.example.md`](guardrails.example.md) — copy it to `GUARDRAILS.md`.
 
 **2. Install the gate in your harness.**
